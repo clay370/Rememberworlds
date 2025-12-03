@@ -26,6 +26,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import com.example.rememberworlds.BookModel
 import com.example.rememberworlds.MainViewModel
 import com.example.rememberworlds.data.db.WordEntity
@@ -177,6 +179,19 @@ fun UserProfileView(viewModel: MainViewModel) {
 
     val isDark by viewModel.isDarkTheme.collectAsState()
 
+    // --- 【新增 1】状态监听 ---
+    val isLoading by viewModel.isLoading.collectAsState()
+    val statusMsg by viewModel.statusMsg.collectAsState()
+    val context = LocalContext.current
+
+    // 监听 statusMsg 变化并弹出 Toast
+    LaunchedEffect(statusMsg) {
+        if (statusMsg.isNotEmpty()) {
+            Toast.makeText(context, statusMsg, Toast.LENGTH_SHORT).show()
+        }
+    }
+    // -----------------------
+
     // 弹窗控制状态
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -236,98 +251,119 @@ fun UserProfileView(viewModel: MainViewModel) {
         )
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp)
-    ) {
-        // --- 头部个人信息 ---
-        item {
-            Column(modifier = Modifier.fillMaxWidth().padding(top = 40.dp, bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(100.dp)) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = currentUser?.username?.firstOrNull()?.toString()?.uppercase() ?: "U", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(text = currentUser?.username ?: "User", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(text = "ID: ${currentUser?.objectId?.take(6)}...", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
-            }
-        }
-
-        // --- 数据统计仪表盘 ---
-        item {
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)) {
-                Row(modifier = Modifier.padding(24.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    StatItem(icon = Icons.Default.Star, value = "$streakDays", label = "坚持天数", tint = Color(0xFFFFD700))
-                    val progressText = if (dailyCount >= dailyGoal) "✅" else "$dailyCount/$dailyGoal"
-                    StatItem(icon = Icons.Default.PlayArrow, value = progressText, label = "今日打卡", tint = Color.White)
-                    StatItem(icon = Icons.Default.Check, value = "$learnedCount", label = "累计已斩", tint = MaterialTheme.colorScheme.tertiaryContainer)
-                }
-            }
-            Spacer(modifier = Modifier.height(24.dp))
-        }
-
-        // --- 应用设置卡片 (可折叠) ---
-        item {
-            Row(modifier = Modifier.fillMaxWidth().clickable { isSettingsExpanded = !isSettingsExpanded }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "应用设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Icon(imageVector = Icons.Default.ArrowForward, contentDescription = if (isSettingsExpanded) "收起" else "展开", modifier = Modifier.rotate(if (isSettingsExpanded) 90f else 0f), tint = MaterialTheme.colorScheme.primary)
-            }
-
-            if (isSettingsExpanded) {
-                Card(modifier = Modifier.padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Column {
-                        // 深色模式
-                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Settings, null, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(modifier = Modifier.width(16.dp)); Text("深色模式", style = MaterialTheme.typography.bodyLarge) }
-                            Switch(checked = isDark, onCheckedChange = { viewModel.toggleTheme(it) })
-                        }
-                        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
-                        // 每日目标
-                        Row(modifier = Modifier.fillMaxWidth().clickable { showGoalDialog = true }.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(modifier = Modifier.width(16.dp)); Text("每日目标", style = MaterialTheme.typography.bodyLarge) }
-                            Row(verticalAlignment = Alignment.CenterVertically) { Text("$dailyGoal 词", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.width(8.dp)); Icon(Icons.Default.ArrowForward, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline) }
-                        }
-                        Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
-                        // 版本信息
-                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(modifier = Modifier.width(16.dp)); Text("版本信息", style = MaterialTheme.typography.bodyLarge) }
-                            Text("v1.0.0", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+    // 使用 Box 包裹整个 LazyColumn，以便在最上层覆盖 Loading 动画
+    Box(modifier = Modifier.fillMaxSize()) {
+        
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
+            // --- 头部个人信息 ---
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(top = 40.dp, bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(100.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(text = currentUser?.username?.firstOrNull()?.toString()?.uppercase() ?: "U", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(text = currentUser?.username ?: "User", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text(text = "ID: ${currentUser?.objectId?.take(6)}...", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                 }
             }
-            Spacer(modifier = Modifier.height(24.dp))
-        }
 
-        // --- 我的词库 (可折叠标题栏) ---
-        item {
-            Row(modifier = Modifier.fillMaxWidth().clickable { isReviewExpanded = !isReviewExpanded }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "单词复习 (已斩)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Icon(imageVector = Icons.Default.ArrowForward, contentDescription = if (isReviewExpanded) "收起" else "展开", modifier = Modifier.rotate(if (isReviewExpanded) 90f else 0f), tint = MaterialTheme.colorScheme.primary)
-            }
-        }
-
-        // --- 列表内容 (根据状态显示/隐藏) ---
-        if (isReviewExpanded) {
-            val downloadedBooks = books.filter { it.isDownloaded }
-            if (downloadedBooks.isEmpty()) {
-                item { Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Text("暂无下载的词书，去首页看看吧", color = Color.Gray) } }
-            } else {
-                items(downloadedBooks) { book -> ReviewBookItem(book) { viewModel.openReviewList(book.type) } }
-            }
-        }
-
-        // --- 底部危险区 ---
-        item {
-            Spacer(modifier = Modifier.height(48.dp))
-            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                Button(onClick = { showLogoutDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), modifier = Modifier.fillMaxWidth().height(50.dp)) {
-                    Icon(Icons.Default.Close, null, modifier = Modifier.size(18.dp)); Spacer(modifier = Modifier.width(8.dp)); Text("退出登录")
+            // --- 数据统计仪表盘 ---
+            item {
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)) {
+                    Row(modifier = Modifier.padding(24.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        StatItem(icon = Icons.Default.Star, value = "$streakDays", label = "坚持天数", tint = Color(0xFFFFD700))
+                        val progressText = if (dailyCount >= dailyGoal) "✅" else "$dailyCount/$dailyGoal"
+                        StatItem(icon = Icons.Default.PlayArrow, value = progressText, label = "今日打卡", tint = Color.White)
+                        StatItem(icon = Icons.Default.Check, value = "$learnedCount", label = "累计已斩", tint = MaterialTheme.colorScheme.tertiaryContainer)
+                    }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                TextButton(onClick = { showDeleteDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error); Spacer(modifier = Modifier.width(4.dp)); Text("注销账户 (永久删除)", color = MaterialTheme.colorScheme.error)
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // --- 应用设置卡片 (可折叠) ---
+            item {
+                Row(modifier = Modifier.fillMaxWidth().clickable { isSettingsExpanded = !isSettingsExpanded }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(text = "应用设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Icon(imageVector = Icons.Default.ArrowForward, contentDescription = if (isSettingsExpanded) "收起" else "展开", modifier = Modifier.rotate(if (isSettingsExpanded) 90f else 0f), tint = MaterialTheme.colorScheme.primary)
+                }
+
+                if (isSettingsExpanded) {
+                    Card(modifier = Modifier.padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column {
+                            // 深色模式
+                            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Settings, null, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(modifier = Modifier.width(16.dp)); Text("深色模式", style = MaterialTheme.typography.bodyLarge) }
+                                Switch(checked = isDark, onCheckedChange = { viewModel.toggleTheme(it) })
+                            }
+                            Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                            // 每日目标
+                            Row(modifier = Modifier.fillMaxWidth().clickable { showGoalDialog = true }.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(modifier = Modifier.width(16.dp)); Text("每日目标", style = MaterialTheme.typography.bodyLarge) }
+                                Row(verticalAlignment = Alignment.CenterVertically) { Text("$dailyGoal 词", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.width(8.dp)); Icon(Icons.Default.ArrowForward, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline) }
+                            }
+                            Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                            // 版本信息
+                            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(modifier = Modifier.width(16.dp)); Text("版本信息", style = MaterialTheme.typography.bodyLarge) }
+                                Text("v1.0.0", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // --- 我的词库 (可折叠标题栏) ---
+            item {
+                Row(modifier = Modifier.fillMaxWidth().clickable { isReviewExpanded = !isReviewExpanded }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(text = "单词复习 (已斩)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Icon(imageVector = Icons.Default.ArrowForward, contentDescription = if (isReviewExpanded) "收起" else "展开", modifier = Modifier.rotate(if (isReviewExpanded) 90f else 0f), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            // --- 列表内容 (根据状态显示/隐藏) ---
+            if (isReviewExpanded) {
+                val downloadedBooks = books.filter { it.isDownloaded }
+                if (downloadedBooks.isEmpty()) {
+                    item { Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Text("暂无下载的词书，去首页看看吧", color = Color.Gray) } }
+                } else {
+                    items(downloadedBooks) { book -> ReviewBookItem(book) { viewModel.openReviewList(book.type) } }
+                }
+            }
+
+            // --- 底部危险区 ---
+            item {
+                Spacer(modifier = Modifier.height(48.dp))
+                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Button(onClick = { showLogoutDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), modifier = Modifier.fillMaxWidth().height(50.dp)) {
+                        Icon(Icons.Default.Close, null, modifier = Modifier.size(18.dp)); Spacer(modifier = Modifier.width(8.dp)); Text("退出登录")
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    TextButton(onClick = { showDeleteDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error); Spacer(modifier = Modifier.width(4.dp)); Text("注销账户 (永久删除)", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+
+        // --- 【新增 2】全屏 Loading 遮罩 ---
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f)) // 半透明黑色背景
+                    .clickable(enabled = false) {}, // 拦截点击事件
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.White)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(text = "处理中...", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }
