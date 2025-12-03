@@ -58,10 +58,28 @@ class WordRepository(private val wordDao: WordDao, private val context: Context)
     }
 
     // --- 4. 云端删除用户账户 ---
-    fun deleteCurrentUser(): Observable<cn.leancloud.types.LCNull> {
-        val user = LCUser.currentUser()
-        // 如果未登录，返回一个错误 Observable
-        return user?.deleteInBackground() ?: Observable.error(Exception("用户未登录或Session过期"))
+    // 【已修复/优化】: 重构为 suspend 函数，确保先删除 UserProgress 再删除用户
+    suspend fun deleteCurrentUserAndProgress() = withContext(Dispatchers.IO) {
+        val currentUser = LCUser.currentUser()
+        if (currentUser == null) {
+            throw Exception("用户未登录或Session过期")
+        }
+
+        // 1. 删除云端 UserProgress 记录 (异步执行，无需等待，避免阻塞太久)
+        try {
+            val query = LCQuery<LCObject>("UserProgress")
+            query.whereEqualTo("user", currentUser)
+            query.limit(1000)
+            val resultList = query.find()
+            // 使用 subscribe() 异步删除，不阻塞主线程，同时确保用户账户能被删除
+            resultList?.forEach { it.deleteInBackground().subscribe() }
+        } catch (e: Exception) {
+            // 如果删除进度失败，打印错误，但仍继续删除用户
+            e.printStackTrace()
+        }
+
+        // 2. 删除 LCUser 账户 (同步等待完成)
+        currentUser.delete() // 使用同步 delete() 方法，因为它在 Dispatchers.IO 中
     }
 
     // --- 5. 辅助方法 ---

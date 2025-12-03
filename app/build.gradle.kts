@@ -31,15 +31,18 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        // [修改] 将版本从 VERSION_11 改为 VERSION_21
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
     kotlinOptions {
-        jvmTarget = "11"
+        // [修改] 将 jvmTarget 从 "11" 改为 "21"
+        jvmTarget = "21"
     }
     buildFeatures {
         compose = true
     }
+}
 
 dependencies {
     implementation(libs.androidx.core.ktx)
@@ -58,6 +61,10 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
+    // [修复] 添加缺失的 Compose 导航和 ViewModel 依赖
+    implementation("androidx.navigation:navigation-compose:2.8.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
+
     // --- 1. Room 数据库 (本地存储) ---
     implementation("androidx.room:room-runtime:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
@@ -68,6 +75,6 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
     // --- 3. LeanCloud (云端版本控制) ---
-    implementation("cn.leancloud:storage-android:8.2.26")
+    implementation("cn.leancloud:storage-android:8.2.28")
     implementation("io.reactivex.rxjava2:rxandroid:2.1.1")
 }

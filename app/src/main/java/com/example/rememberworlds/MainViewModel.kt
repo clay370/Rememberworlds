@@ -441,34 +441,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    // 【已修复/优化】: 使用 Coroutine 替代 RxJava，并调用 Repository 中新的完整删除逻辑
     fun deleteAccount() {
         _isLoading.value = true
         _statusMsg.value = "正在注销..."
-        repository.deleteCurrentUser().subscribe(object : Observer<cn.leancloud.types.LCNull> {
-            override fun onSubscribe(d: Disposable) {}
-            override fun onNext(t: cn.leancloud.types.LCNull) {
-                viewModelScope.launch {
-                    repository.clearAllData()
-                    getApplication<Application>().getSharedPreferences("app_config", Context.MODE_PRIVATE).edit().clear().apply()
-                    getApplication<Application>().getSharedPreferences("user_stats", Context.MODE_PRIVATE).edit().clear().apply()
-                    _bookList.value = emptyList()
-                    _isLearningMode.value = false
-                    _currentWord.value = null
-                    _streakDays.value = 0
-                    _dailyCount.value = 0
-                    LCUser.logOut()
-                    _currentUser.value = null
-                    _isLoading.value = false
-                    _statusMsg.value = "已注销"
-                    refreshBookshelf()
-                }
-            }
-            override fun onError(e: Throwable) {
-                _isLoading.value = false
+        viewModelScope.launch {
+            try {
+                // 1. 删除云端用户和进度 (调用新的 suspend 函数)
+                repository.deleteCurrentUserAndProgress()
+
+                // 2. 清除本地数据和状态
+                repository.clearAllData()
+                getApplication<Application>().getSharedPreferences("app_config", Context.MODE_PRIVATE).edit().clear().apply()
+                getApplication<Application>().getSharedPreferences("user_stats", Context.MODE_PRIVATE).edit().clear().apply()
+
+                // 3. 更新 UI 状态
+                _bookList.value = emptyList()
+                _isLearningMode.value = false
+                _currentWord.value = null
+                _streakDays.value = 0
+                _dailyCount.value = 0
+                LCUser.logOut()
+                _currentUser.value = null
+                _statusMsg.value = "已注销"
+                refreshBookshelf()
+
+            } catch (e: Exception) {
+                // 捕获错误，例如网络错误或Session过期
                 _statusMsg.value = translateError(e)
+            } finally {
+                _isLoading.value = false
             }
-            override fun onComplete() {}
-        })
+        }
     }
 
     fun startLearning(bookType: String) {
