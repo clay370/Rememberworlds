@@ -1,107 +1,162 @@
 package com.example.rememberworlds.data.repository
 
 import android.content.Context
-import cn.leancloud.LCObject
-import cn.leancloud.LCQuery
-import cn.leancloud.LCUser
+import android.util.Log
 import com.example.rememberworlds.data.db.WordDao
 import com.example.rememberworlds.data.db.WordEntity
 import com.example.rememberworlds.data.network.NetworkModule
 import com.example.rememberworlds.data.network.SearchResponseItem
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 class WordRepository(private val wordDao: WordDao, private val context: Context) {
 
+    private val db = FirebaseFirestore.getInstance()
+    private val auth = FirebaseAuth.getInstance()
+
     // --- 1. 同步进度 ---
+    // 从 Firestore: users/{uid}/progress 集合中拉取数据
     suspend fun syncUserProgress(bookType: String) = withContext(Dispatchers.IO) {
-        val currentUser = LCUser.currentUser() ?: return@withContext
+        val user = auth.currentUser ?: return@withContext
         try {
-            val query = LCQuery<LCObject>("UserProgress")
-            query.whereEqualTo("user", currentUser)
-            query.whereEqualTo("book_type", bookType)
-            query.limit(1000)
-            val resultList = query.find()
-            if (resultList != null && resultList.isNotEmpty()) {
-                val learnedIds = resultList.map { it.getInt("word_id") }
-                wordDao.markWordsAsLearned(bookType, learnedIds)
+            // 查询: users -> {uid} -> progress 集合，筛选 book_type
+            val snapshot = db.collection("users")
+                .document(user.uid)
+                .collection("progress")
+                .whereEqualTo("book_type", bookType)
+                .get()
+                .await() // 使用协程等待结果
+
+            if (!snapshot.isEmpty) {
+                // 提取 word_id 列表
+                val learnedIds = snapshot.documents.mapNotNull {
+                    // Firestore 中数字默认可能是 Long，需要转 Int
+                    (it.getLong("word_id"))?.toInt()
+                }
+                if (learnedIds.isNotEmpty()) {
+                    wordDao.markWordsAsLearned(bookType, learnedIds)
+                }
             }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     // --- 2. 保存进度 ---
-    fun saveWordProgress(bookType: String, wordId: Int) {
-        val currentUser = LCUser.currentUser() ?: return
-        val progress = LCObject("UserProgress")
-        progress.put("user", currentUser)
-        progress.put("book_type", bookType)
-        progress.put("word_id", wordId)
-        progress.saveInBackground().subscribe()
+    // 写入 Firestore: users/{uid}/progress
+    suspend fun saveWordProgress(bookType: String, wordId: Int) = withContext(Dispatchers.IO) {
+        val user = auth.currentUser ?: return@withContext
+        try {
+            val data = hashMapOf(
+                "book_type" to bookType,
+                "word_id" to wordId,
+                "timestamp" to System.currentTimeMillis()
+            )
+            // 添加文档
+            db.collection("users")
+                .document(user.uid)
+                .collection("progress")
+                .add(data)
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     // --- 3. 撤销斩杀 ---
     suspend fun revertWordStatus(bookType: String, wordId: Int) = withContext(Dispatchers.IO) {
-        wordDao.markAsUnlearned(wordId)
+        wordDao.markAsUnlearned(wordId) // 本地回滚
+        
+        val user = auth.currentUser ?: return@withContext
         try {
-            val currentUser = LCUser.currentUser()
-            if (currentUser != null) {
-                val query = LCQuery<LCObject>("UserProgress")
-                query.whereEqualTo("user", currentUser)
-                query.whereEqualTo("book_type", bookType)
-                query.whereEqualTo("word_id", wordId)
-                val results = query.find()
-                // 这里量很少，用 forEach delete 也没问题，或者用 deleteAll
-                if (results != null && results.isNotEmpty()) {
-                    LCObject.deleteAll(results)
-                }
+            // 先查询找到那个文档
+            val snapshot = db.collection("users")
+                .document(user.uid)
+                .collection("progress")
+                .whereEqualTo("book_type", bookType)
+                .whereEqualTo("word_id", wordId)
+                .get()
+                .await()
+
+            // 删除找到的文档
+            for (document in snapshot.documents) {
+                document.reference.delete().await()
             }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
-    // --- 4. 云端删除用户账户 ---
-    // 【已修复】: 支持删除超过1000条数据，并确保数据删完后才删用户
+    // --- 4. 注销账户 (包含删除数据) ---
     suspend fun deleteCurrentUserAndProgress() = withContext(Dispatchers.IO) {
-        val currentUser = LCUser.currentUser() ?: throw Exception("用户未登录或Session过期")
+        val user = auth.currentUser ?: throw Exception("未登录")
 
-        // 步骤 1: 循环删除所有 UserProgress 记录 (处理数据量 > 1000 的情况)
-        // 这一步必须完全成功，否则不进行下一步
         try {
-            var hasMoreData = true
-            while (hasMoreData) {
-                val query = LCQuery<LCObject>("UserProgress")
-                query.whereEqualTo("user", currentUser)
-                query.limit(1000) // LeanCloud 单次查询上限
-                val resultList = query.find()
+            // 1. 删除该用户下所有的 progress 数据 (Firestore 删除集合比较麻烦，需要遍历删除)
+            // 简单做法：这里演示删除 progress 子集合中的所有文档
+            val progressCollection = db.collection("users").document(user.uid).collection("progress")
+            var snapshot = progressCollection.limit(100).get().await()
+            
+            while (!snapshot.isEmpty) {
+                val batch = db.batch()
+                for (doc in snapshot.documents) {
+                    batch.delete(doc.reference)
+                }
+                batch.commit().await()
+                snapshot = progressCollection.limit(100).get().await()
+            }
 
-                if (resultList != null && resultList.isNotEmpty()) {
-                    // 同步批量删除，阻塞直到完成
-                    LCObject.deleteAll(resultList)
-                    
-                    // 如果取出的数量少于 1000，说明是最后一批，或者已经删完了
-                    if (resultList.size < 1000) {
-                        hasMoreData = false
+            // 2. 删除用户 User (Auth)
+            user.delete().await()
+        } catch (e: Exception) {
+            throw e
+        }
+    }
+
+    // --- 5. 检查更新 ---
+    // 查询 Firestore: VersionControl 集合
+    suspend fun checkUpdate(bookType: String): Boolean = withContext(Dispatchers.IO) {
+        var isUpdated = false
+        try {
+            // 假设 Firestore 中有一个集合叫 VersionControl，里面存了各本书的配置
+            val snapshot = db.collection("VersionControl")
+                .whereEqualTo("book_type", bookType)
+                .get()
+                .await()
+
+            if (!snapshot.isEmpty) {
+                val doc = snapshot.documents[0]
+                val cloudVersion = doc.getLong("version_code")?.toInt() ?: 0
+                val downloadUrl = doc.getString("json_url") ?: ""
+
+                val prefs = context.getSharedPreferences("app_config", Context.MODE_PRIVATE)
+                val localVersion = prefs.getInt("version_$bookType", 0)
+
+                if (cloudVersion > localVersion && downloadUrl.isNotEmpty()) {
+                    // 下载逻辑保持不变
+                    val jsonList = NetworkModule.api.downloadWords(downloadUrl)
+                    val entityList = jsonList.map { json ->
+                        WordEntity(id = json.id, word = json.word, cn = json.cn, audio = json.audio, bookType = bookType)
                     }
-                } else {
-                    hasMoreData = false
+                    wordDao.clearBook(bookType)
+                    wordDao.insertAll(entityList)
+                    
+                    prefs.edit().putInt("version_$bookType", cloudVersion).apply()
+                    syncUserProgress(bookType)
+                    isUpdated = true
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            // 如果清理数据这一步就挂了，抛出异常阻止删除用户，提示用户重试
-            throw Exception("数据清理中断，请检查网络后重试: ${e.message}")
+            // throw e // 可选：是否抛出异常给 ViewModel 处理
         }
-
-        // 步骤 2: 删除 LCUser 账户
-        try {
-            currentUser.delete()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            // 如果数据删完了，但人没删掉 (比如网络波动)，抛出异常让 ViewModel 提示用户
-            throw Exception("数据已清除，但账户注销失败: ${e.message}")
-        }
+        return@withContext isUpdated
     }
-
-    // --- 5. 辅助方法 ---
+    
+    // ... 其他保持不变 ...
     suspend fun searchWordOnline(word: String): SearchResponseItem? = withContext(Dispatchers.IO) {
         try {
             val url = "https://api.dictionaryapi.dev/api/v2/entries/en/$word"
@@ -109,35 +164,6 @@ class WordRepository(private val wordDao: WordDao, private val context: Context)
             if (response.isNotEmpty()) return@withContext response[0]
         } catch (e: Exception) { e.printStackTrace() }
         return@withContext null
-    }
-
-    suspend fun checkUpdate(bookType: String): Boolean = withContext(Dispatchers.IO) {
-        var isUpdated = false
-        try {
-            val query = LCQuery<LCObject>("VersionControl")
-            query.whereEqualTo("book_type", bookType)
-            val resultList = query.find()
-
-            if (resultList != null && resultList.isNotEmpty()) {
-                val cloudData = resultList[0]
-                val cloudVersion = cloudData.getInt("version_code")
-                val downloadUrl = cloudData.getString("json_url")
-
-                val prefs = context.getSharedPreferences("app_config", Context.MODE_PRIVATE)
-                val localVersion = prefs.getInt("version_$bookType", 0)
-
-                if (cloudVersion > localVersion) {
-                    val jsonList = NetworkModule.api.downloadWords(downloadUrl)
-                    val entityList = jsonList.map { json -> WordEntity(id = json.id, word = json.word, cn = json.cn, audio = json.audio, bookType = bookType) }
-                    wordDao.clearBook(bookType)
-                    wordDao.insertAll(entityList)
-                    prefs.edit().putInt("version_$bookType", cloudVersion).apply()
-                    syncUserProgress(bookType)
-                    isUpdated = true
-                }
-            }
-        } catch (e: Exception) { throw e }
-        return@withContext isUpdated
     }
 
     suspend fun deleteBook(bookType: String) = withContext(Dispatchers.IO) { wordDao.clearBook(bookType) }

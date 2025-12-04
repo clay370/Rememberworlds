@@ -263,12 +263,12 @@ fun UserProfileView(viewModel: MainViewModel) {
                 Column(modifier = Modifier.fillMaxWidth().padding(top = 40.dp, bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(100.dp)) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text(text = currentUser?.username?.firstOrNull()?.toString()?.uppercase() ?: "U", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                            Text(text = currentUser?.email?.firstOrNull()?.toString()?.uppercase() ?: "U", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(text = currentUser?.username ?: "User", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text(text = "ID: ${currentUser?.objectId?.take(6)}...", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
+                    Text(text = currentUser?.email ?: "User", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text(text = "ID: ${currentUser?.uid?.take(6)}...", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                 }
             }
 

@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp") version "2.0.21-1.0.26"
+    // [新增] Google 服务插件
+    id("com.google.gms.google-services") version "4.4.0"
 }
 
 android {
@@ -74,7 +76,9 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
-    // --- 3. LeanCloud (云端版本控制) ---
-    implementation("cn.leancloud:storage-android:8.2.28")
-    implementation("io.reactivex.rxjava2:rxandroid:2.1.1")
+    // [新增] Firebase (使用 BOM 管理版本)
+    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-auth")      // 认证
+    implementation("com.google.firebase:firebase-firestore") // 数据库
 }

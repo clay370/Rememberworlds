@@ -16,14 +16,12 @@ import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import cn.leancloud.LCUser
-import cn.leancloud.LCException
 import com.example.rememberworlds.data.db.AppDatabase
 import com.example.rememberworlds.data.db.WordEntity
 import com.example.rememberworlds.data.network.SearchResponseItem
 import com.example.rememberworlds.data.repository.WordRepository
-import io.reactivex.Observer
-import io.reactivex.disposables.Disposable
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,8 +67,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private val _downloadingBookType = MutableStateFlow<String?>(null)
     val downloadingBookType = _downloadingBookType.asStateFlow()
-    private val _currentUser = MutableStateFlow<LCUser?>(LCUser.currentUser())
+    // [修改] 用户类型变为 FirebaseUser
+    private val _currentUser = MutableStateFlow<FirebaseUser?>(FirebaseAuth.getInstance().currentUser)
     val currentUser = _currentUser.asStateFlow()
+    
+    private val auth = FirebaseAuth.getInstance() // [新增] Auth 实例
+    
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
     private val _statusMsg = MutableStateFlow("")
@@ -461,7 +463,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 _currentWord.value = null
                 _streakDays.value = 0
                 _dailyCount.value = 0
-                LCUser.logOut()
+                auth.signOut() // [修改] Firebase 退出
                 _currentUser.value = null
                 _statusMsg.value = "已注销"
                 refreshBookshelf()
@@ -558,35 +560,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     // --- 用户系统 ---
+    // [修改] 登录逻辑
     fun login(u: String, p: String) {
-        if (!_isOnline.value) { Toast.makeText(getApplication(), "无网络", Toast.LENGTH_SHORT).show(); return }
+        if (!_isOnline.value) {
+            Toast.makeText(getApplication(), "无网络", Toast.LENGTH_SHORT).show()
+            return
+        }
         _isLoading.value = true
-        LCUser.logIn(u, p).subscribe(object : Observer<LCUser> {
-            override fun onSubscribe(d: Disposable) {}
-            override fun onNext(t: LCUser) { _currentUser.value = t; _isLoading.value = false; refreshBookshelf(); initDailyStats() }
-            override fun onError(e: Throwable) { _isLoading.value = false; _statusMsg.value = translateError(e) }
-            override fun onComplete() {}
-        })
+        // 这里的 u 必须是 email。LeanCloud 可以是用户名，Firebase 默认是 Email。
+        // 如果你之前的用户名不是 Email，可能需要调整 UI 提示让用户输入 Email。
+        auth.signInWithEmailAndPassword(u, p)
+            .addOnSuccessListener { result ->
+                _currentUser.value = result.user
+                _isLoading.value = false
+                _statusMsg.value = "登录成功"
+                refreshBookshelf()
+                initDailyStats()
+            }
+            .addOnFailureListener { e ->
+                _isLoading.value = false
+                _statusMsg.value = "登录失败: ${e.message}"
+            }
     }
 
+    // [修改] 注册逻辑
     fun register(u: String, p: String) {
-        if (!_isOnline.value) { Toast.makeText(getApplication(), "无网络", Toast.LENGTH_SHORT).show(); return }
+        if (!_isOnline.value) {
+            Toast.makeText(getApplication(), "无网络", Toast.LENGTH_SHORT).show()
+            return
+        }
         _isLoading.value = true
-        val user = LCUser().apply { username = u; password = p }
-        user.signUpInBackground().subscribe(object : Observer<LCUser> {
-            override fun onSubscribe(d: Disposable) {}
-            override fun onNext(t: LCUser) { _currentUser.value = t; _isLoading.value = false; refreshBookshelf(); initDailyStats() }
-            override fun onError(e: Throwable) { _isLoading.value = false; _statusMsg.value = translateError(e) }
-            override fun onComplete() {}
-        })
+        auth.createUserWithEmailAndPassword(u, p)
+            .addOnSuccessListener { result ->
+                _currentUser.value = result.user
+                _isLoading.value = false
+                _statusMsg.value = "注册成功"
+                refreshBookshelf()
+                initDailyStats()
+            }
+            .addOnFailureListener { e ->
+                _isLoading.value = false
+                _statusMsg.value = "注册失败: ${e.message}"
+            }
     }
 
+    // [修改] 退出登录
     fun logout() {
         viewModelScope.launch {
             repository.clearAllData()
+            // ... 清除 SP ...
             getApplication<Application>().getSharedPreferences("app_config", Context.MODE_PRIVATE).edit().clear().apply()
             getApplication<Application>().getSharedPreferences("user_stats", Context.MODE_PRIVATE).edit().clear().apply()
-            _bookList.value = emptyList(); _isLearningMode.value = false; _currentWord.value = null; _streakDays.value = 0; _dailyCount.value = 0; LCUser.logOut(); _currentUser.value = null; _statusMsg.value = "已安全退出"; refreshBookshelf()
+            
+            _bookList.value = emptyList()
+            _isLearningMode.value = false
+            _currentWord.value = null
+            _streakDays.value = 0
+            _dailyCount.value = 0
+            
+            auth.signOut() // [修改] Firebase 退出
+            _currentUser.value = null
+            _statusMsg.value = "已安全退出"
+            refreshBookshelf()
         }
     }
 
