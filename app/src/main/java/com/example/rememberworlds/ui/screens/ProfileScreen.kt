@@ -31,9 +31,12 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.rememberworlds.BookModel
 import com.example.rememberworlds.MainViewModel
 import com.example.rememberworlds.data.db.WordEntity
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 
 @Composable
-fun ProfileScreen(viewModel: MainViewModel) {
+// 增加 navController 参数
+fun ProfileScreen(viewModel: MainViewModel, navController: androidx.navigation.NavController? = null) {
     val currentUser by viewModel.currentUser.collectAsState()
     val isReviewing by viewModel.isReviewingMode.collectAsState()
 
@@ -43,7 +46,7 @@ fun ProfileScreen(viewModel: MainViewModel) {
         if (isReviewing) {
             ReviewListView(viewModel)
         } else {
-            UserProfileView(viewModel)
+            UserProfileView(viewModel, navController)
         }
     }
 }
@@ -167,7 +170,9 @@ fun LoginRegisterView(viewModel: MainViewModel) {
 
 // ================= 2. 用户信息页 (含设置和统计) =================
 @Composable
-fun UserProfileView(viewModel: MainViewModel) {
+fun UserProfileView(viewModel: MainViewModel, navController: androidx.navigation.NavController?) {
+    // [新增] 获取详细资料
+    val userProfile by viewModel.userProfile.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val books by viewModel.bookList.collectAsState()
 
@@ -188,6 +193,7 @@ fun UserProfileView(viewModel: MainViewModel) {
     LaunchedEffect(statusMsg) {
         if (statusMsg.isNotEmpty()) {
             Toast.makeText(context, statusMsg, Toast.LENGTH_SHORT).show()
+            viewModel.clearStatusMsg() // 【新增】显示完立即清空，防止下次进来再弹
         }
     }
     // -----------------------
@@ -261,13 +267,39 @@ fun UserProfileView(viewModel: MainViewModel) {
             // --- 头部个人信息 ---
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(top = 40.dp, bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(100.dp)) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(text = currentUser?.email?.firstOrNull()?.toString()?.uppercase() ?: "U", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                    // 替换原来的 Surface 部分
+                    if (userProfile.avatarUrl.isNotEmpty()) {
+                        AsyncImage(
+                            model = userProfile.avatarUrl,
+                            contentDescription = "Avatar",
+                            modifier = Modifier
+                                .size(100.dp)
+                                .clip(CircleShape)
+                                .clickable { navController?.navigate(com.example.rememberworlds.Screen.PersonalInfo.route) },
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        // 原来的默认字母头像代码
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier
+                                .size(100.dp)
+                                .clickable { navController?.navigate(com.example.rememberworlds.Screen.PersonalInfo.route) }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = userProfile.nickname.firstOrNull()?.toString()?.uppercase() ?: "U",
+                                    style = MaterialTheme.typography.displayMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(text = currentUser?.email ?: "User", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    // 修改下方显示名字的地方
+                    Text(text = userProfile.nickname, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Text(text = "ID: ${currentUser?.uid?.take(6)}...", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                 }
             }

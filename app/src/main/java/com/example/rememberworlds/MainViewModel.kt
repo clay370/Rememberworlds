@@ -22,11 +22,17 @@ import com.example.rememberworlds.data.network.SearchResponseItem
 import com.example.rememberworlds.data.repository.WordRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import com.example.rememberworlds.data.model.UserProfile
+import android.net.Uri
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -48,8 +54,25 @@ data class Question(
 enum class QuizType {
     EN_TO_CN,
     CN_TO_EN,
-    AUDIO_TO_CN
+    AUDIO_TO_CN,
+    SPELLING     // [新增] 拼写题
 }
+
+// [新增] 连击状态
+data class ComboState(
+    val count: Int = 0,
+    val multiplier: Float = 1.0f,
+    val showAnimation: Boolean = false
+)
+
+// [新增] 拼写题状态
+data class SpellingState(
+    val input: String = "",
+    val hintText: String = "", // 显示如 "a _ _ l _"
+    val isError: Boolean = false,
+    val hintCount: Int = 0,
+    val correctAnswer: String = "" // 存储正确答案，用于错误时显示
+)
 
 // --- ViewModel ---
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
@@ -72,6 +95,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val currentUser = _currentUser.asStateFlow()
     
     private val auth = FirebaseAuth.getInstance() // [新增] Auth 实例
+    
+    // [新增] 扩展用户资料状态
+    private val _userProfile = MutableStateFlow(UserProfile())
+    val userProfile = _userProfile.asStateFlow()
     
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
@@ -110,6 +137,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _userSelectedOption = MutableStateFlow("")
     val userSelectedOption = _userSelectedOption.asStateFlow()
 
+    // --- [新增] 扩展状态 ---
+    private val _comboState = MutableStateFlow(ComboState())
+    val comboState = _comboState.asStateFlow()
+
+    private val _spellingState = MutableStateFlow(SpellingState())
+    val spellingState = _spellingState.asStateFlow()
+
+    private val _timeLeft = MutableStateFlow(15.0f) // 倒计时剩余秒数
+    val timeLeft = _timeLeft.asStateFlow()
+    private val _totalTime = MutableStateFlow(15.0f) // 总时间
+
+    private var timerJob: Job? = null
+    private val _wrongWords = mutableListOf<WordEntity>() // 本次错题
+
     // 统计数据
     val learnedCount: Flow<Int> = db.wordDao().getLearnedCount()
     val totalCount: Flow<Int> = db.wordDao().getTotalCount()
@@ -131,6 +172,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         initDailyStats()
         initNetworkMonitor()
         tts = TextToSpeech(application, this)
+        
+        // [新增] 监听 currentUser 变化，登录成功后拉取详细资料
+        viewModelScope.launch {
+            currentUser.collect { user ->
+                if (user != null) {
+                    fetchUserProfile(user.uid)
+                } else {
+                    _userProfile.value = UserProfile() // 重置
+                }
+            }
+        }
     }
 
     // --- 主题逻辑 ---
@@ -249,22 +301,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
 
             val quizWords = allWords.shuffled().take(10)
+            // 修改题目生成逻辑，支持拼写
             val questions = quizWords.map { target ->
                 val qType = when(mode) {
+                    4 -> QuizType.SPELLING // [新增] 模式4为拼写
                     1 -> QuizType.EN_TO_CN
                     2 -> QuizType.CN_TO_EN
                     3 -> QuizType.AUDIO_TO_CN
                     else -> QuizType.values().random()
                 }
-
-                val distractors = allWords.filter { it.id != target.id }.shuffled().take(3)
-
-                val options = if (qType == QuizType.CN_TO_EN) {
-                    (distractors + target).map { it.word }.shuffled()
-                } else {
-                    (distractors + target).map { it.cn }.shuffled()
+                
+                // 如果是拼写题，options 可以为空，或者作为干扰项(如果做键盘)
+                // 这里为了简单，拼写题 options 留空
+                val options = if (qType == QuizType.SPELLING) emptyList() else {
+                    val distractors = allWords.filter { it.id != target.id }.shuffled().take(3)
+                    if (qType == QuizType.CN_TO_EN) {
+                        (distractors + target).map { it.word }.shuffled()
+                    } else {
+                        (distractors + target).map { it.cn }.shuffled()
+                    }
                 }
-
                 Question(target, options, qType)
             }
 
@@ -273,7 +329,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             _quizScore.value = 0
             _answerState.value = 0
             _userSelectedOption.value = ""
+            _comboState.value = ComboState() // 重置连击
+            _wrongWords.clear()
             _isQuizFinished.value = false
+            
+            startTimer() // [新增] 开始倒计时
+            initSpellingState(questions[0]) // [新增] 初始化拼写
 
             if (questions.isNotEmpty() && questions[0].type == QuizType.AUDIO_TO_CN) {
                 delay(500)
@@ -298,13 +359,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
 
         if (correct) {
-            _quizScore.value += 10
-            _answerState.value = 1
-            triggerVibration(true)
+            processCorrectAnswer()
         } else {
             _answerState.value = 2
+            _comboState.value = ComboState(0, 1.0f) // 连击断裂
             triggerVibration(false)
+            _wrongWords.add(_quizQuestions.value[_currentQuizIndex.value].targetWord)
         }
+        timerJob?.cancel() // 停止计时
     }
 
     fun nextQuestion() {
@@ -315,11 +377,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             _currentQuizIndex.value += 1
             _answerState.value = 0
             _userSelectedOption.value = ""
-
+            
             val nextQ = qs[_currentQuizIndex.value]
             if (nextQ.type == QuizType.AUDIO_TO_CN) {
                 playAudio(nextQ.targetWord.audio, nextQ.targetWord.word)
             }
+            
+            // 在切换题目时，重置拼写和计时
+            startTimer()
+            initSpellingState(nextQ)
         } else {
             _isQuizFinished.value = true
         }
@@ -328,6 +394,99 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun quitQuiz() {
         _quizQuestions.value = emptyList()
         mediaPlayer?.release()
+        timerJob?.cancel() // 取消计时
+    }
+
+    // --- [新增] 倒计时逻辑 ---
+    private fun startTimer() {
+        timerJob?.cancel()
+        _timeLeft.value = 15.0f // 每题15秒
+        timerJob = viewModelScope.launch {
+            while (_timeLeft.value > 0 && isActive) {
+                delay(100) // 0.1秒刷新一次
+                _timeLeft.value -= 0.1f
+            }
+            if (_timeLeft.value <= 0) {
+                handleTimeout()
+            }
+        }
+    }
+
+    private fun handleTimeout() {
+        _answerState.value = 2 // 视为错误
+        _comboState.value = ComboState(0, 1.0f) // 连击断裂
+        // 记录错题
+        val currentQ = _quizQuestions.value.getOrNull(_currentQuizIndex.value)
+        currentQ?.let { _wrongWords.add(it.targetWord) }
+    }
+
+    // --- [新增] 拼写逻辑 ---
+    private fun initSpellingState(q: Question) {
+        if (q.type == QuizType.SPELLING) {
+            // 初始化提示，全部显示为 _
+            val length = q.targetWord.word.length
+            val mask = "_ ".repeat(length).trim()
+            _spellingState.value = SpellingState(
+                input = "", 
+                hintText = mask,
+                correctAnswer = q.targetWord.word // 设置正确答案
+            )
+        }
+    }
+
+    fun updateSpellingInput(input: String) {
+        _spellingState.value = _spellingState.value.copy(input = input, isError = false)
+    }
+
+    fun submitSpelling() {
+        val currentQ = _quizQuestions.value[_currentQuizIndex.value]
+        val input = _spellingState.value.input.trim()
+        val target = currentQ.targetWord.word.trim()
+
+        if (input.equals(target, ignoreCase = true)) {
+            // 答对
+            processCorrectAnswer()
+        } else {
+            // 答错
+            _spellingState.value = _spellingState.value.copy(isError = true)
+            _comboState.value = ComboState(0, 1.0f) // 连击清零
+            _answerState.value = 2 // 设置为错误状态
+            triggerVibration(false)
+            _wrongWords.add(currentQ.targetWord) // 记录错题
+            timerJob?.cancel() // 停止计时
+        }
+    }
+
+    fun useHint() {
+        val currentQ = _quizQuestions.value[_currentQuizIndex.value]
+        val word = currentQ.targetWord.word
+        val currentInput = _spellingState.value.input
+        
+        // 简单的提示：自动填充下一个正确的字母
+        if (currentInput.length < word.length) {
+            val nextChar = word[currentInput.length]
+            val newInput = currentInput + nextChar
+            _spellingState.value = _spellingState.value.copy(
+                input = newInput,
+                hintCount = _spellingState.value.hintCount + 1
+            )
+            // 扣分逻辑可以加在这里
+        }
+    }
+
+    // --- [新增] 统一的答对处理 ---
+    private fun processCorrectAnswer() {
+        val currentCombo = _comboState.value.count + 1
+        // 连击加分公式：基础分10 * (1 + 连击数 * 0.1)
+        val multiplier = 1.0f + (currentCombo * 0.1f)
+        val points = (10 * multiplier).toInt()
+        
+        _quizScore.value += points
+        _answerState.value = 1
+        _comboState.value = ComboState(currentCombo, multiplier, true)
+        
+        triggerVibration(true)
+        timerJob?.cancel()
     }
 
     // ================= 每日打卡逻辑 =================
@@ -430,6 +589,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 Toast.makeText(getApplication(), "失败", Toast.LENGTH_SHORT).show()
             } finally {
                 _downloadingBookType.value = null
+                _statusMsg.value = "" // 【新增】操作结束后，必须清空状态！
             }
         }
     }
@@ -560,16 +720,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     // --- 用户系统 ---
-    // [修改] 登录逻辑
+    // 修改后的 login 函数
     fun login(u: String, p: String) {
         if (!_isOnline.value) {
-            Toast.makeText(getApplication(), "无网络", Toast.LENGTH_SHORT).show()
+            _statusMsg.value = "当前无网络连接"
             return
         }
+        
+        // 【修复1】处理用户名：如果用户没输 @，自动加上假后缀
+        val email = if (u.contains("@")) u else "$u@rememberworlds.com"
+        
         _isLoading.value = true
-        // 这里的 u 必须是 email。LeanCloud 可以是用户名，Firebase 默认是 Email。
-        // 如果你之前的用户名不是 Email，可能需要调整 UI 提示让用户输入 Email。
-        auth.signInWithEmailAndPassword(u, p)
+        _statusMsg.value = "正在连接服务器..." // 提示用户正在连接
+
+        auth.signInWithEmailAndPassword(email, p)
             .addOnSuccessListener { result ->
                 _currentUser.value = result.user
                 _isLoading.value = false
@@ -579,18 +743,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
             .addOnFailureListener { e ->
                 _isLoading.value = false
-                _statusMsg.value = "登录失败: ${e.message}"
+                // 【调试建议】将英文错误翻译成中文提示
+                val errorMsg = when {
+                    e.message?.contains("network") == true -> "网络连接失败，请确保开启了VPN"
+                    e.message?.contains("password") == true -> "密码错误"
+                    e.message?.contains("no user") == true -> "账号不存在"
+                    else -> "登录失败: ${e.message}"
+                }
+                _statusMsg.value = errorMsg
+                Log.e("AuthError", "Login failed", e) // 在 Logcat 打印详细错误
             }
     }
 
-    // [修改] 注册逻辑
+    // 修改后的 register 函数
     fun register(u: String, p: String) {
         if (!_isOnline.value) {
-            Toast.makeText(getApplication(), "无网络", Toast.LENGTH_SHORT).show()
+            _statusMsg.value = "当前无网络连接"
             return
         }
+
+        // 【修复1】同样处理注册时的邮箱
+        val email = if (u.contains("@")) u else "$u@rememberworlds.com"
+
         _isLoading.value = true
-        auth.createUserWithEmailAndPassword(u, p)
+        _statusMsg.value = "正在注册..."
+
+        auth.createUserWithEmailAndPassword(email, p)
             .addOnSuccessListener { result ->
                 _currentUser.value = result.user
                 _isLoading.value = false
@@ -600,7 +778,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
             .addOnFailureListener { e ->
                 _isLoading.value = false
-                _statusMsg.value = "注册失败: ${e.message}"
+                val errorMsg = when {
+                    e.message?.contains("network") == true -> "网络连接失败，请确保开启了VPN"
+                    e.message?.contains("email") == true -> "账号格式错误或已被占用"
+                    e.message?.contains("password") == true -> "密码长度需大于6位"
+                    else -> "注册失败: ${e.message}"
+                }
+                _statusMsg.value = errorMsg
+                Log.e("AuthError", "Register failed", e)
             }
     }
 
@@ -625,5 +810,96 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    // [新增] 从 Firestore 拉取资料
+    private fun fetchUserProfile(uid: String) {
+        viewModelScope.launch {
+            try {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val snapshot = db.collection("user_profiles").document(uid).get().await()
+                
+                if (snapshot.exists()) {
+                    // 将 Firestore 数据转为 UserProfile 对象
+                    val profile = snapshot.toObject(UserProfile::class.java)
+                    if (profile != null) {
+                        _userProfile.value = profile
+                    }
+                } else {
+                    // 如果还没有资料，初始化一份
+                    val newProfile = UserProfile(uid = uid, nickname = _currentUser.value?.email?.split("@")?.get(0) ?: "用户")
+                    _userProfile.value = newProfile
+                    // 只有在修改时才写入，这里暂时只在本地更新
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // [新增] 更新某一项资料
+    fun updateProfileField(field: String, value: String) {
+        val uid = _currentUser.value?.uid ?: return
+        
+        // 1. 更新本地状态
+        val current = _userProfile.value
+        val updated = when(field) {
+            "nickname" -> current.copy(nickname = value)
+            "gender" -> current.copy(gender = value)
+            "birthDate" -> current.copy(birthDate = value)
+            "location" -> current.copy(location = value)
+            "school" -> current.copy(school = value)
+            "grade" -> current.copy(grade = value)
+            else -> current
+        }
+        _userProfile.value = updated
+
+        // 2. 同步到 Firestore
+        viewModelScope.launch {
+            try {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                db.collection("user_profiles").document(uid).set(updated).await()
+                _statusMsg.value = "资料已更新"
+                delay(1000)
+                _statusMsg.value = "" // 清除提示
+            } catch (e: Exception) {
+                _statusMsg.value = "更新失败: ${e.message}"
+            }
+        }
+    }
+    
+    // [新增] 上传头像功能
+    fun uploadAvatar(uri: Uri) {
+        val uid = auth.currentUser?.uid ?: return
+        
+        _isLoading.value = true
+        _statusMsg.value = "正在上传头像..."
+
+        // 1. 获取 Firebase Storage 引用
+        // 路径：avatars/{用户ID}.jpg
+        val storageRef = FirebaseStorage.getInstance().reference
+        val avatarRef = storageRef.child("avatars/$uid.jpg")
+
+        // 2. 上传文件
+        avatarRef.putFile(uri)
+            .addOnSuccessListener {
+                // 3. 上传成功后，获取下载链接
+                avatarRef.downloadUrl.addOnSuccessListener { downloadUri ->
+                    // 4. 将下载链接更新到 Firestore 用户资料中
+                    updateProfileField("avatarUrl", downloadUri.toString())
+                    _isLoading.value = false
+                    _statusMsg.value = "头像更新成功"
+                }
+            }
+            .addOnFailureListener { e ->
+                _isLoading.value = false
+                _statusMsg.value = "上传失败: ${e.message}"
+                e.printStackTrace()
+            }
+    }
+    
     private fun translateError(e: Throwable) = e.message ?: "Error"
+    
+    // 添加一个通用的清空方法
+    fun clearStatusMsg() {
+        _statusMsg.value = ""
+    }
 }

@@ -81,4 +81,9 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth")      // 认证
     implementation("com.google.firebase:firebase-firestore") // 数据库
+    // [新增] Firebase 存储 (用于存头像)
+    implementation("com.google.firebase:firebase-storage")
+
+    // [新增] Coil 图片加载库 (用于显示头像)
+    implementation("io.coil-kt:coil-compose:2.6.0")
 }

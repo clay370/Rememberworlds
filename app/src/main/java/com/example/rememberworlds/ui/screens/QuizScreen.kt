@@ -3,6 +3,7 @@ package com.example.rememberworlds.ui.screens
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
@@ -25,9 +27,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.*
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.rememberworlds.BookModel
 import com.example.rememberworlds.MainViewModel
+import com.example.rememberworlds.Question
 import com.example.rememberworlds.QuizType
 
 data class QuizModeItem(
@@ -115,7 +120,8 @@ fun QuizSelectionView(viewModel: MainViewModel) {
                 QuizModeItem("综合测试", "全方位考察听说读写", Icons.Default.List, 0, Color(0xFF5C6BC0)),
                 QuizModeItem("英 ➡ 中", "快速回忆中文释义", Icons.Default.Create, 1, Color(0xFF42A5F5)),
                 QuizModeItem("中 ➡ 英", "逆向思维拼写记忆", Icons.Default.Face, 2, Color(0xFF66BB6A)),
-                QuizModeItem("听音选义", "磨耳朵专项训练", Icons.Default.PlayArrow, 3, Color(0xFFFFA726))
+                QuizModeItem("听音选义", "磨耳朵专项训练", Icons.Default.PlayArrow, 3, Color(0xFFFFA726)),
+                QuizModeItem("拼写训练", "强化拼写能力", Icons.Default.Star, 4, Color(0xFFEC407A))
             )
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -261,17 +267,13 @@ fun ActiveQuizView(viewModel: MainViewModel) {
     val currentIndex by viewModel.currentQuizIndex.collectAsState()
     val answerState by viewModel.answerState.collectAsState() // 0: 未回答, 1: 正确, 2: 错误
     val userSelectedOption by viewModel.userSelectedOption.collectAsState()
+    
+    // [新增] 状态
+    val timeLeft by viewModel.timeLeft.collectAsState()
+    val comboState by viewModel.comboState.collectAsState()
 
     // 当前题目数据
     val currentQ = questions[currentIndex]
-
-    // 进度条动画
-    val targetProgress = (currentIndex + 1) / questions.size.toFloat()
-    val progressAnim by animateFloatAsState(
-        targetValue = targetProgress,
-        animationSpec = tween(500),
-        label = "progress"
-    )
 
     Column(
         modifier = Modifier
@@ -306,101 +308,28 @@ fun ActiveQuizView(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 进度条
+        // [新增] 倒计时条
         LinearProgressIndicator(
-            progress = {
-                progressAnim
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp)),
-            strokeCap = StrokeCap.Round,
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant
+            progress = { timeLeft / 15.0f },
+            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+            color = if (timeLeft < 5f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
         )
+
+        // [新增] 连击展示动画
+        if (comboState.count > 1) {
+            ComboDisplay(comboState.count, comboState.multiplier)
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // 题干区域
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(2f),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                when (currentQ.type) {
-                    QuizType.EN_TO_CN -> {
-                        Text(
-                            text = currentQ.targetWord.word,
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 50.sp
-                        )
-                    }
-                    QuizType.CN_TO_EN -> {
-                        Text(
-                            text = currentQ.targetWord.cn,
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    QuizType.AUDIO_TO_CN -> {
-                        // 发音按钮
-                        FilledTonalIconButton(
-                            onClick = {
-                                viewModel.playAudio(currentQ.targetWord.audio, currentQ.targetWord.word)
-                            },
-                            modifier = Modifier.size(100.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.PlayArrow,
-                                null,
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            "点击重播",
-                            color = Color.Gray
-                        )
-                    }
-                }
-            }
+        // 4. 题目区域 (根据类型切换视图)
+        if (currentQ.type == QuizType.SPELLING) {
+            SpellingQuizView(currentQ, viewModel)
+        } else {
+            MultipleChoiceView(currentQ, viewModel) // 原来的选择题逻辑移到这里
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // 选项区域
-        Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            currentQ.options.forEach { option ->
-                // 判断当前选项是否是正确答案
-                val isCorrectAnswer = when (currentQ.type) {
-                    QuizType.CN_TO_EN -> option == currentQ.targetWord.word
-                    else -> option == currentQ.targetWord.cn
-                }
-
-                QuizOptionButton(
-                    text = option,
-                    answerState = answerState,
-                    isCorrectAnswer = isCorrectAnswer,
-                    isSelected = (option == userSelectedOption),
-                    onClick = {
-                        viewModel.answerQuestion(option)
-                    }
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.weight(1f))
 
         // 下一题按钮/占位符
         if (answerState != 0) {
@@ -480,6 +409,181 @@ fun QuizOptionButton(text: String, answerState: Int, isCorrectAnswer: Boolean, i
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+// [新增] 拼写题视图
+@Composable
+fun SpellingQuizView(question: Question, viewModel: MainViewModel) {
+    val state by viewModel.spellingState.collectAsState()
+    val answerState by viewModel.answerState.collectAsState()
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("请拼写出中文对应的单词", color = Color.Gray)
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // 中文提示
+        Text(
+            text = question.targetWord.cn,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold
+        )
+        
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 输入框
+        OutlinedTextField(
+            value = state.input,
+            onValueChange = { if (answerState == 0) viewModel.updateSpellingInput(it) },
+            label = { Text("输入单词") },
+            isError = state.isError,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = answerState == 0
+        )
+        
+        if (state.isError) {
+            Text("拼写错误，请重试", color = MaterialTheme.colorScheme.error)
+        }
+        
+        // 显示正确答案（当回答错误时）
+        if (answerState == 2) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 16.dp)) {
+                Text("正确答案是:", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp))
+                Text(
+                    text = state.correctAnswer,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 操作按钮行
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            OutlinedButton(
+                onClick = { viewModel.useHint() },
+                enabled = answerState == 0
+            ) {
+                Icon(Icons.Default.Info, null)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("提示")
+            }
+            
+            Button(
+                onClick = { viewModel.submitSpelling() },
+                enabled = answerState == 0 && state.input.isNotEmpty()
+            ) {
+                Icon(Icons.Default.CheckCircle, null)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("提交")
+            }
+        }
+    }
+}
+
+// [新增] 连击特效组件
+@Composable
+fun ComboDisplay(combo: Int, multiplier: Float) {
+    // 简单的缩放动画
+    val infiniteTransition = rememberInfiniteTransition()
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500),
+            repeatMode = RepeatMode.Reverse
+        ), label = "combo"
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+    ) {
+        Text(
+            text = "$combo Combo!",
+            style = MaterialTheme.typography.headlineLarge,
+            color = Color(0xFFFFD700), // 金色
+            fontWeight = FontWeight.Black
+        )
+        Text(
+            text = "得分 x${String.format("%.1f", multiplier)}",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+// 封装原有的选择题视图
+@Composable
+fun MultipleChoiceView(question: Question, viewModel: MainViewModel) {
+    val answerState by viewModel.answerState.collectAsState()
+    val userSelectedOption by viewModel.userSelectedOption.collectAsState()
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // 题干显示逻辑
+        when (question.type) {
+            QuizType.EN_TO_CN -> {
+                Text(
+                    text = question.targetWord.word,
+                    fontSize = 42.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 50.sp
+                )
+            }
+            QuizType.CN_TO_EN -> {
+                Text(
+                    text = question.targetWord.cn,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            QuizType.AUDIO_TO_CN -> {
+                // 发音按钮
+                FilledTonalIconButton(
+                    onClick = {
+                        viewModel.playAudio(question.targetWord.audio, question.targetWord.word)
+                    },
+                    modifier = Modifier.size(100.dp)
+                ) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "点击重播",
+                    color = Color.Gray
+                )
+            }
+            else -> {}
+        }
+    }
+    
+    Spacer(modifier = Modifier.height(24.dp))
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        question.options.forEach { option ->
+            // 计算 isCorrectAnswer
+            val isCorrect = if (question.type == QuizType.CN_TO_EN) option == question.targetWord.word else option == question.targetWord.cn
+            
+            QuizOptionButton(
+                text = option,
+                answerState = answerState,
+                isCorrectAnswer = isCorrect,
+                isSelected = (option == userSelectedOption),
+                onClick = { viewModel.answerQuestion(option) }
+            )
+        }
     }
 }
 

@@ -49,6 +49,8 @@ sealed class Screen(
     object Home : Screen("home", "学习", Icons.Default.Home)
     object Quiz : Screen("quiz", "测试", Icons.Default.Star)
     object Profile : Screen("profile", "我的", Icons.Default.Person)
+    // [新增]
+    object PersonalInfo : Screen("personal_info", "个人资料", Icons.Default.Person)
 }
 
 // =================================================================
@@ -244,7 +246,13 @@ fun AppNavigationHost(
             QuizScreen(viewModel)
         }
         composable(Screen.Profile.route) {
-            ProfileScreen(viewModel)
+            ProfileScreen(viewModel, navController)
+        }
+
+        // [新增] 个人资料页配置
+        composable(Screen.PersonalInfo.route) {
+            // 导入上面写的 PersonalInfoScreen
+            com.example.rememberworlds.ui.screens.PersonalInfoScreen(navController, viewModel)
         }
     }
 }
