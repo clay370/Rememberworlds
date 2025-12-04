@@ -58,56 +58,76 @@ import com.example.rememberworlds.data.network.SearchResponseItem
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * 应用程序主页
+ * 根据学习模式显示不同的视图：学习模式显示LearningView，非学习模式显示BookshelfView
+ * 包含搜索结果弹窗
+ *
+ * @param viewModel 主视图模型
+ */
 @Composable
 fun HomeScreen(viewModel: MainViewModel) {
-    // 状态收集
-    val isLearning by viewModel.isLearningMode.collectAsState()
-    val showSearchDialog by viewModel.showSearchDialog.collectAsState()
-    val searchResult by viewModel.searchResult.collectAsState()
+    // 状态收集 - 从ViewModel中获取应用状态
+    val isLearningMode by viewModel.isLearningMode.collectAsState()
+    val showSearchDialogState by viewModel.showSearchDialog.collectAsState()
+    val searchResultState by viewModel.searchResult.collectAsState()
 
-    // Sheet 状态
-    val sheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true
+    // 配置底部弹窗状态
+    val modalBottomSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { true }
     )
 
-    // 搜索结果弹窗
-    if (showSearchDialog && searchResult != null) {
+    // 搜索结果弹窗 - 当需要显示且有搜索结果时展示
+    if (showSearchDialogState && searchResultState != null) {
         ModalBottomSheet(
             onDismissRequest = {
+                // 关闭搜索对话框
                 viewModel.closeSearchDialog()
             },
-            sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surfaceContainer, // 优化：使用 Container 色
-            scrimColor = Color.Black.copy(alpha = 0.5f)
+            sheetState = modalBottomSheetState,
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            scrimColor = Color.Black.copy(alpha = 0.5f),
+            shape = MaterialTheme.shapes.large
         ) {
+            // 显示单词详情视图
             WordDetailView(
-                wordItem = searchResult!!,
+                wordItem = searchResultState!!,
                 viewModel = viewModel
             )
         }
     }
 
-    // 根据模式显示不同视图
-    if (isLearning) {
-        LearningView(viewModel)
+    // 根据当前模式显示不同的主视图
+    if (isLearningMode) {
+        // 学习模式 - 显示单词学习界面
+        LearningView(viewModel = viewModel)
     } else {
-        BookshelfView(viewModel)
+        // 非学习模式 - 显示书架界面
+        BookshelfView(viewModel = viewModel)
     }
 }
 
+/**
+ * 书架视图
+ * 显示用户的书籍列表，包含搜索功能和书籍卡片
+ *
+ * @param viewModel 主视图模型，用于获取书籍列表和处理搜索逻辑
+ */
 @Composable
 fun BookshelfView(viewModel: MainViewModel) {
-    // 状态收集
-    val books by viewModel.bookList.collectAsState()
-    val downloadingType by viewModel.downloadingBookType.collectAsState()
-    val isSearching by viewModel.isSearching.collectAsState()
+    // 从ViewModel收集状态
+    val booksList by viewModel.bookList.collectAsState() // 书籍列表
+    val currentDownloadingBookType by viewModel.downloadingBookType.collectAsState() // 当前正在下载的书籍类型
+    val isSearchingState by viewModel.isSearching.collectAsState() // 是否正在搜索
 
-    // 局部状态
-    var searchText by remember {
-        mutableStateOf("")
+    // 局部状态管理
+    var searchInputText by remember {
+        mutableStateOf("") // 搜索输入文本
     }
-    val focusManager = LocalFocusManager.current
+    val localFocusManager = LocalFocusManager.current // 焦点管理器，用于清除焦点
 
+    // 容器修饰符 - 定义整体布局样式
     val containerModifier = Modifier
         .fillMaxSize()
         .padding(
@@ -118,8 +138,8 @@ fun BookshelfView(viewModel: MainViewModel) {
     Column(
         modifier = containerModifier
     ) {
-        // 查词输入框
-        val searchColors = OutlinedTextFieldDefaults.colors(
+        // 搜索输入框配置
+        val searchTextFieldColors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
             unfocusedBorderColor = Color.Transparent,
@@ -127,24 +147,28 @@ fun BookshelfView(viewModel: MainViewModel) {
         )
 
         val searchKeyboardOptions = KeyboardOptions(
-            imeAction = ImeAction.Search
+            imeAction = ImeAction.Search,
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Text
         )
 
         val searchKeyboardActions = KeyboardActions(
             onSearch = {
-                viewModel.searchWord(searchText)
-                focusManager.clearFocus()
+                // 执行搜索操作
+                viewModel.searchWord(searchInputText)
+                // 清除焦点
+                localFocusManager.clearFocus()
             }
         )
 
+        // 搜索输入框组件
         OutlinedTextField(
-            value = searchText,
+            value = searchInputText,
             onValueChange = {
-                searchText = it
+                searchInputText = it
             },
             placeholder = {
                 Text(
-                    "查词...",
+                    text = "查词...",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             },
@@ -154,46 +178,51 @@ fun BookshelfView(viewModel: MainViewModel) {
             singleLine = true,
             leadingIcon = {
                 Icon(
-                    Icons.Default.Search,
-                    null,
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "搜索图标",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             },
             trailingIcon = {
-                if (isSearching) {
+                if (isSearchingState) {
+                    // 搜索中显示加载指示器
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
                     )
-                } else if (searchText.isNotEmpty()) {
+                } else if (searchInputText.isNotEmpty()) {
+                    // 搜索完成且有输入时显示搜索按钮
                     IconButton(
                         onClick = {
-                            viewModel.searchWord(searchText)
-                            focusManager.clearFocus()
+                            viewModel.searchWord(searchInputText)
+                            localFocusManager.clearFocus()
                         }
                     ) {
                         Icon(
-                            Icons.Default.ArrowBack,
+                            imageVector = Icons.Default.ArrowBack,
                             contentDescription = "搜索",
-                            modifier = Modifier.rotate(180f)
+                            modifier = Modifier.rotate(180f),
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
             },
             keyboardOptions = searchKeyboardOptions,
             keyboardActions = searchKeyboardActions,
-            colors = searchColors
+            colors = searchTextFieldColors
         )
 
+        // 间距 - 分隔搜索框和书架标题
         Spacer(modifier = Modifier.height(24.dp))
 
-        // 标题行
+        // 书架标题行
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                Icons.Default.List,
-                null,
+                imageVector = Icons.Default.List,
+                contentDescription = "书架图标",
                 tint = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.width(8.dp))
@@ -205,6 +234,7 @@ fun BookshelfView(viewModel: MainViewModel) {
             )
         }
 
+        // 间距 - 分隔标题和书籍列表
         Spacer(modifier = Modifier.height(16.dp))
 
         // 书籍网格列表
@@ -212,13 +242,16 @@ fun BookshelfView(viewModel: MainViewModel) {
             columns = GridCells.Fixed(2),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 16.dp)
+            contentPadding = PaddingValues(bottom = 16.dp),
+            modifier = Modifier.fillMaxSize()
         ) {
-            items(books) { book ->
-                val isThisBookDownloading = (downloadingType == book.type)
+            items(booksList) { book ->
+                // 检查当前书籍是否正在下载
+                val isBookDownloading = (currentDownloadingBookType == book.type)
+                // 渲染单个书籍卡片
                 BookItemCard(
                     book = book,
-                    isDownloading = isThisBookDownloading,
+                    isDownloading = isBookDownloading,
                     viewModel = viewModel
                 )
             }
@@ -226,55 +259,70 @@ fun BookshelfView(viewModel: MainViewModel) {
     }
 }
 
+/**
+ * 书籍卡片
+ * 显示单本书籍的信息，包括名称、下载状态和操作按钮
+ *
+ * @param book 书籍模型，包含书籍的基本信息
+ * @param isDownloading 是否正在下载当前书籍
+ * @param viewModel 主视图模型，用于处理书籍相关操作
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookItemCard(book: BookModel, isDownloading: Boolean, viewModel: MainViewModel) {
-    val isDark = isSystemInDarkTheme()
+    // 检查当前是否为深色主题
+    val isDarkTheme = isSystemInDarkTheme()
 
-    val containerColor = if (book.isDownloaded) {
+    // 根据书籍下载状态设置容器颜色
+    val cardContainerColor = if (book.isDownloaded) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
         MaterialTheme.colorScheme.surfaceContainerHighest
     }
 
-
-    val contentColor = if (book.isDownloaded) {
+    // 根据书籍下载状态设置内容颜色
+    val cardContentColor = if (book.isDownloaded) {
         MaterialTheme.colorScheme.onPrimaryContainer
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-
-    val spineColor = if (book.isDownloaded) {
+    // 根据书籍下载状态设置书脊颜色
+    val cardSpineColor = if (book.isDownloaded) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
     }
 
-    val cardBorder = if (isDark && !book.isDownloaded) {
+    // 根据主题和下载状态设置卡片边框
+    val cardBorder = if (isDarkTheme && !book.isDownloaded) {
         BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     } else {
         null
     }
 
+    // 卡片样式配置
     val cardElevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     val cardShape = RoundedCornerShape(12.dp)
-    val cardColors = CardDefaults.cardColors(containerColor = containerColor)
+    val cardColors = CardDefaults.cardColors(containerColor = cardContainerColor)
 
-
+    // 卡片组件
     Card(
         onClick = {
+            // 根据书籍状态执行不同操作
             if (book.isDownloaded) {
+                // 已下载：开始学习
                 viewModel.startLearning(book.type)
             }
             else if (!isDownloading) {
+                // 未下载且未在下载中：开始下载
                 viewModel.downloadBook(book)
             }
         },
         elevation = cardElevation,
         shape = cardShape,
         colors = cardColors,
-        border = cardBorder, // 关键优化：深色模式下添加微弱边框，防止卡片和背景融为一体
+        border = cardBorder,
         modifier = Modifier
             .fillMaxWidth()
             .height(170.dp)
@@ -283,18 +331,17 @@ fun BookItemCard(book: BookModel, isDownloading: Boolean, viewModel: MainViewMod
             modifier = Modifier
                 .fillMaxSize()
         ) {
-
-            // 书脊
+            // 书脊 - 左侧彩色条
             Box(
                 modifier = Modifier
                     .width(12.dp)
                     .fillMaxHeight()
                     .background(
-                        spineColor.copy(alpha = 0.8f)
+                        cardSpineColor.copy(alpha = 0.8f)
                     )
             )
 
-            // 内容区域
+            // 内容区域 - 右侧主要内容
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -307,19 +354,22 @@ fun BookItemCard(book: BookModel, isDownloading: Boolean, viewModel: MainViewMod
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.Top
                 ) {
+                    // 书名
                     Text(
                         text = book.name,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = contentColor,
+                        color = cardContentColor,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
 
+                    // 删除按钮 - 仅已下载书籍显示
                     if (book.isDownloaded) {
                         IconButton(
                             onClick = {
+                                // 执行删除书籍操作
                                 viewModel.deleteBook(book)
                             },
                             modifier = Modifier
@@ -327,7 +377,7 @@ fun BookItemCard(book: BookModel, isDownloading: Boolean, viewModel: MainViewMod
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
-                                contentDescription = "删除",
+                                contentDescription = "删除书籍",
                                 tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
                                 modifier = Modifier.size(18.dp)
                             )
@@ -342,10 +392,11 @@ fun BookItemCard(book: BookModel, isDownloading: Boolean, viewModel: MainViewMod
                         .fillMaxWidth(),
                     contentAlignment = Alignment.CenterEnd
                 ) {
+                    // 根据下载状态显示不同背景图标
                     Icon(
                         imageVector = if (book.isDownloaded) Icons.Default.List else Icons.Default.Add,
-                        contentDescription = null,
-                        tint = contentColor.copy(alpha = 0.1f),
+                        contentDescription = "背景图标",
+                        tint = cardContentColor.copy(alpha = 0.1f),
                         modifier = Modifier.size(60.dp)
                     )
                 }
@@ -354,80 +405,91 @@ fun BookItemCard(book: BookModel, isDownloading: Boolean, viewModel: MainViewMod
                 Box(
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (isDownloading) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 2.dp,
-                                color = contentColor
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "下载中...",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = contentColor
-                            )
+                    when {
+                        // 正在下载状态
+                        isDownloading -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = cardContentColor
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "下载中...",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = cardContentColor
+                                )
+                            }
                         }
-                    } else if (book.isDownloaded) {
-                        val startLearningButtonColors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        )
-                        val startLearningButtonShape = RoundedCornerShape(8.dp)
+                        // 已下载状态
+                        book.isDownloaded -> {
+                            // 开始学习按钮配置
+                            val startLearningButtonColors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                            val startLearningButtonShape = RoundedCornerShape(8.dp)
 
-                        Button(
-                            onClick = {
-                                viewModel.startLearning(book.type)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(36.dp),
-                            contentPadding = PaddingValues(0.dp),
-                            colors = startLearningButtonColors,
-                            shape = startLearningButtonShape
-                        ) {
-                            Icon(
-                                Icons.Default.PlayArrow,
-                                null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                "开始背诵",
-                                fontSize = 13.sp
-                            )
+                            // 开始学习按钮
+                            Button(
+                                onClick = {
+                                    viewModel.startLearning(book.type)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp),
+                                contentPadding = PaddingValues(0.dp),
+                                colors = startLearningButtonColors,
+                                shape = startLearningButtonShape
+                            ) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = "开始学习",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "开始背诵",
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
-                    } else {
-                        val downloadButtonColors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
-                            contentColor = contentColor
-                        )
-                        val downloadButtonShape = RoundedCornerShape(8.dp)
+                        // 未下载状态
+                        else -> {
+                            // 下载按钮配置
+                            val downloadButtonColors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
+                                contentColor = cardContentColor
+                            )
+                            val downloadButtonShape = RoundedCornerShape(8.dp)
 
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.downloadBook(book)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(36.dp),
-                            contentPadding = PaddingValues(0.dp),
-                            shape = downloadButtonShape,
-                            border = null,
-                            colors = downloadButtonColors
-                        ) {
-                            Icon(
-                                Icons.Default.Add,
-                                null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                "点击下载",
-                                fontSize = 13.sp
-                            )
+                            // 下载按钮
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.downloadBook(book)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp),
+                                contentPadding = PaddingValues(0.dp),
+                                shape = downloadButtonShape,
+                                border = null,
+                                colors = downloadButtonColors
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "下载书籍",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "点击下载",
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -436,24 +498,32 @@ fun BookItemCard(book: BookModel, isDownloading: Boolean, viewModel: MainViewMod
     }
 }
 
+/**
+ * 学习视图
+ * 显示单词卡片，支持翻转查看释义，包含操作按钮
+ *
+ * @param viewModel 主视图模型，用于获取单词数据和处理学习操作
+ */
 @Composable
 fun LearningView(viewModel: MainViewModel) {
     // 状态收集
-    val currentWord by viewModel.currentWord.collectAsState()
+    val currentWord by viewModel.currentWord.collectAsState() // 当前要学习的单词
 
-    // 局部状态
+    // 局部状态管理
     var rotationState by remember {
-        mutableStateOf(0f)
+        mutableStateOf(0f) // 卡片旋转角度，0f为正面，180f为背面
     }
-    var autoPlay by remember {
-        mutableStateOf(true)
+    var autoPlayAudio by remember {
+        mutableStateOf(true) // 是否自动播放发音
     }
 
-    // 单词切换时的 Side Effect
+    // 单词切换时的副作用
     LaunchedEffect(currentWord) {
+        // 重置卡片旋转状态
         rotationState = 0f
-        if (currentWord != null && autoPlay) {
-            delay(300)
+        // 如果有单词且开启了自动发音，则延迟播放音频
+        if (currentWord != null && autoPlayAudio) {
+            delay(300) // 延迟300ms播放，给用户准备时间
             viewModel.playAudio(
                 currentWord!!.audio,
                 currentWord!!.word
@@ -461,15 +531,17 @@ fun LearningView(viewModel: MainViewModel) {
         }
     }
 
-    // 旋转动画
+    // 旋转动画配置
     val rotation by animateFloatAsState(
         targetValue = rotationState,
         animationSpec = tween(
-            durationMillis = 400
+            durationMillis = 400, // 动画持续时间400ms
+            easing = androidx.compose.animation.core.LinearOutSlowInEasing
         ),
         label = "cardFlip"
     )
 
+    // 主布局
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -483,52 +555,58 @@ fun LearningView(viewModel: MainViewModel) {
                 .padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // 返回和标题
+            // 左侧：返回按钮和标题
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
                     onClick = {
+                        // 退出学习模式，返回书架
                         viewModel.quitLearning()
                     }
                 ) {
                     Icon(
-                        Icons.Default.ArrowBack,
-                        contentDescription = "返回",
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "返回书架",
                         tint = MaterialTheme.colorScheme.onBackground
                     )
                 }
                 Text(
-                    "背单词",
+                    text = "背单词",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground
                 )
             }
 
-            // 自动发音开关
+            // 右侧：自动发音开关
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "自动发音",
+                    text = "自动发音",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline
                 )
                 Spacer(modifier = Modifier.width(8.dp))
 
+                // 开关颜色配置
                 val switchColors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.primary,
                     checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+                    uncheckedThumbColor = MaterialTheme.colorScheme.surfaceVariant,
+                    uncheckedTrackColor = MaterialTheme.colorScheme.outlineVariant,
                     uncheckedBorderColor = MaterialTheme.colorScheme.outline
                 )
 
+                // 自动发音开关组件
                 Switch(
-                    checked = autoPlay,
+                    checked = autoPlayAudio,
                     onCheckedChange = {
-                        autoPlay = it
+                        autoPlayAudio = it
                     },
                     modifier = Modifier.graphicsLayer {
+                        // 缩小开关尺寸
                         scaleX = 0.8f
                         scaleY = 0.8f
                     },
@@ -537,6 +615,7 @@ fun LearningView(viewModel: MainViewModel) {
             }
         }
 
+        // 内容区域：根据是否有单词显示不同内容
         if (currentWord == null) {
             // 单词背完或列表为空
             EmptyStateView(viewModel)
@@ -546,23 +625,26 @@ fun LearningView(viewModel: MainViewModel) {
             // 单词卡片区域
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(1f) // 占据剩余空间
                     .fillMaxWidth()
                     .padding(bottom = 32.dp),
-                contentAlignment = Alignment.Center
+                contentAlignment = Alignment.Center // 居中对齐
             ) {
+                // 卡片样式配置
                 val cardShape = RoundedCornerShape(24.dp)
                 val cardElevation = CardDefaults.cardElevation(8.dp)
                 val cardColors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
 
+                // 可翻转的卡片组件
                 Card(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            rotationY = rotation
-                            cameraDistance = 12f * density
+                            rotationY = rotation // 应用旋转动画
+                            cameraDistance = 12f * density // 设置3D效果
                         }
                         .clickable {
+                            // 点击翻转卡片
                             rotationState = if (rotationState == 0f) 180f else 0f
                         },
                     elevation = cardElevation,
@@ -573,10 +655,10 @@ fun LearningView(viewModel: MainViewModel) {
                         modifier = Modifier.fillMaxSize()
                     ) {
                         if (rotation <= 90f) {
-                            // 正面内容
+                            // 正面内容：显示单词
                             FrontCardContent(word.word)
                         } else {
-                            // 背面内容，需要反向旋转才能看到正向文字
+                            // 背面内容：显示释义，需要反向旋转才能看到正向文字
                             Box(
                                 modifier = Modifier
                                     .graphicsLayer {
@@ -598,7 +680,7 @@ fun LearningView(viewModel: MainViewModel) {
                     .height(80.dp),
                 horizontalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                // 不认识按钮
+                // 左侧：不认识按钮
                 val unknownButtonColors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer
@@ -607,6 +689,7 @@ fun LearningView(viewModel: MainViewModel) {
 
                 Button(
                     onClick = {
+                        // 标记为不认识
                         viewModel.markUnknown()
                     },
                     colors = unknownButtonColors,
@@ -618,15 +701,15 @@ fun LearningView(viewModel: MainViewModel) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Default.Close, null)
+                        Icon(Icons.Default.Close, contentDescription = "不认识")
                         Text(
-                            "不认识",
+                            text = "不认识",
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                // 认识按钮
+                // 右侧：认识按钮
                 val knownButtonColors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
@@ -634,6 +717,7 @@ fun LearningView(viewModel: MainViewModel) {
 
                 Button(
                     onClick = {
+                        // 标记为认识（斩）
                         viewModel.markKnown()
                     },
                     colors = knownButtonColors,
@@ -645,9 +729,9 @@ fun LearningView(viewModel: MainViewModel) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Default.Check, null)
+                        Icon(Icons.Default.Check, contentDescription = "认识")
                         Text(
-                            "认识 (斩)",
+                            text = "认识 (斩)",
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -657,19 +741,24 @@ fun LearningView(viewModel: MainViewModel) {
     }
 }
 
+/**
+ * 单词卡片正面内容
+ * 显示单词和提示文字
+ *
+ * @param wordText 单词文本
+ */
 @Composable
 fun FrontCardContent(wordText: String) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // 优化：深色模式下去掉过于明显的渐变，改用纯色背景，显得更干净
             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         contentAlignment = Alignment.Center
     ) {
         // 左上角装饰图标
         Icon(
-            Icons.Default.Search,
-            null,
+            imageVector = Icons.Default.Search,
+            contentDescription = "装饰图标",
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(24.dp)
@@ -698,8 +787,16 @@ fun FrontCardContent(wordText: String) {
     }
 }
 
+/**
+ * 单词卡片背面内容
+ * 显示单词、发音按钮和中文释义
+ *
+ * @param word 单词实体，包含单词、发音和中文释义
+ * @param viewModel 主视图模型，用于播放音频
+ */
 @Composable
 fun BackCardContent(word: WordEntity, viewModel: MainViewModel) {
+    // 卡片背景修饰符
     val cardBackgroundModifier = Modifier
         .fillMaxSize()
         .background(MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -708,6 +805,7 @@ fun BackCardContent(word: WordEntity, viewModel: MainViewModel) {
         modifier = cardBackgroundModifier,
         contentAlignment = Alignment.Center
     ) {
+        // 列布局修饰符
         val columnModifier = Modifier
             .fillMaxSize()
             .padding(24.dp)
@@ -735,8 +833,8 @@ fun BackCardContent(word: WordEntity, viewModel: MainViewModel) {
                 modifier = iconButtonModifier
             ) {
                 Icon(
-                    Icons.Default.PlayArrow,
-                    null,
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "播放发音",
                     modifier = Modifier.size(32.dp)
                 )
             }
@@ -764,9 +862,16 @@ fun BackCardContent(word: WordEntity, viewModel: MainViewModel) {
     }
 }
 
-// 4. 查词详情页
+/**
+ * 单词详情视图
+ * 显示搜索结果的详细信息，包括单词、音标、发音和释义
+ *
+ * @param wordItem 搜索响应项，包含单词的详细信息
+ * @param viewModel 主视图模型，用于播放音频
+ */
 @Composable
 fun WordDetailView(wordItem: SearchResponseItem, viewModel: MainViewModel) {
+    // 列布局修饰符
     val columnModifier = Modifier
         .fillMaxWidth()
         .padding(
@@ -784,12 +889,13 @@ fun WordDetailView(wordItem: SearchResponseItem, viewModel: MainViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
+            // 左侧：单词和音标
             Column(
                 modifier = Modifier.weight(1f)
             ) {
                 // 单词
                 Text(
-                    wordItem.word ?: "Unknown",
+                    text = wordItem.word ?: "Unknown",
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
@@ -798,16 +904,17 @@ fun WordDetailView(wordItem: SearchResponseItem, viewModel: MainViewModel) {
                 // 音标
                 if (!wordItem.phonetic.isNullOrEmpty()) {
                     Text(
-                        wordItem.phonetic!!,
+                        text = wordItem.phonetic!!,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.secondary
                     )
                 }
             }
 
-            // 发音按钮
+            // 右侧：发音按钮
             val audioUrl = wordItem.phonetics?.find { !it.audio.isNullOrEmpty() }?.audio
             if (!audioUrl.isNullOrEmpty()) {
+                // 发音按钮样式
                 val iconButtonColors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
@@ -818,14 +925,15 @@ fun WordDetailView(wordItem: SearchResponseItem, viewModel: MainViewModel) {
                     colors = iconButtonColors
                 ) {
                     Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = "播放",
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "播放发音",
                         tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
         }
 
+        // 分隔线
         HorizontalDivider(
             modifier = Modifier.padding(vertical = 16.dp)
         )
@@ -843,7 +951,7 @@ fun WordDetailView(wordItem: SearchResponseItem, viewModel: MainViewModel) {
                         onClick = { /* Do nothing */ },
                         label = {
                             Text(
-                                meaning.partOfSpeech ?: "其他",
+                                text = meaning.partOfSpeech ?: "其他",
                                 fontStyle = FontStyle.Italic
                             )
                         },
@@ -851,22 +959,22 @@ fun WordDetailView(wordItem: SearchResponseItem, viewModel: MainViewModel) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // 具体的定义和例句
-                    meaning.definitions?.take(3)?.forEachIndexed { index, def ->
+                    // 具体的定义和例句，最多显示3个
+                    meaning.definitions?.take(3)?.forEachIndexed { index, definition ->
                         Column(
                             modifier = Modifier.padding(vertical = 4.dp)
                         ) {
                             // 定义
                             Text(
-                                "${index + 1}. ${def.definition}",
+                                text = "${index + 1}. ${definition.definition}",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
                             // 例句
-                            if (!def.example.isNullOrEmpty()) {
+                            if (!definition.example.isNullOrEmpty()) {
                                 Text(
-                                    "e.g. \"${def.example}\"",
+                                    text = "e.g. \"${definition.example}\"",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.outline,
                                     fontStyle = FontStyle.Italic,
@@ -878,6 +986,7 @@ fun WordDetailView(wordItem: SearchResponseItem, viewModel: MainViewModel) {
                     }
                 }
             }
+            // 底部间距
             item {
                 Spacer(modifier = Modifier.height(20.dp))
             }
@@ -885,6 +994,12 @@ fun WordDetailView(wordItem: SearchResponseItem, viewModel: MainViewModel) {
     }
 }
 
+/**
+ * 空状态视图
+ * 当没有单词可学时显示
+ *
+ * @param viewModel 主视图模型，用于返回书架
+ */
 @Composable
 fun EmptyStateView(viewModel: MainViewModel) {
     Column(
@@ -892,18 +1007,21 @@ fun EmptyStateView(viewModel: MainViewModel) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // 庆祝表情
         Text(
-            "🎉",
+            text = "🎉",
             fontSize = 80.sp
         )
         Spacer(modifier = Modifier.height(24.dp))
+        // 庆祝文字
         Text(
-            "太棒了！",
+            text = "太棒了！",
             style = MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
         )
         Spacer(modifier = Modifier.height(48.dp))
+        // 返回书架按钮
         Button(
             onClick = {
                 viewModel.quitLearning()
@@ -912,12 +1030,18 @@ fun EmptyStateView(viewModel: MainViewModel) {
                 .width(200.dp)
                 .height(50.dp)
         ) {
-            Text("返回书架")
+            Text(text = "返回书架")
         }
     }
 }
 
-// 扩展函数
+// 扩展函数：为Modifier添加scale方法
+/**
+ * 扩展Modifier，添加缩放功能
+ *
+ * @param scale 缩放比例，1.0f为原始大小
+ * @return 修改后的Modifier
+ */
 fun Modifier.scale(scale: Float): Modifier = this.then(
     Modifier.graphicsLayer {
         scaleX = scale

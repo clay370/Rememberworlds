@@ -38,134 +38,243 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-// --- 数据模型 ---
+// --- 数据模型 --- 
+/**
+ * 书籍模型数据类
+ * 表示应用程序中的一个单词书
+ *
+ * @param type 书籍类型标识符
+ * @param name 书籍名称
+ * @param isDownloaded 是否已下载
+ */
 data class BookModel(
     val type: String,
     val name: String,
     val isDownloaded: Boolean = false
 )
 
+/**
+ * 测验题目数据类
+ * 表示一个测验题目
+ *
+ * @param targetWord 目标单词
+ * @param options 选项列表
+ * @param type 测验类型
+ */
 data class Question(
     val targetWord: WordEntity,
     val options: List<String>,
     val type: QuizType
 )
 
+/**
+ * 测验类型枚举
+ * 定义支持的测验类型
+ */
 enum class QuizType {
+    /** 英转中 - 从英文单词选择中文释义 */
     EN_TO_CN,
+    /** 中转英 - 从中文释义选择英文单词 */
     CN_TO_EN,
+    /** 听音选义 - 听音频选择中文释义 */
     AUDIO_TO_CN,
-    SPELLING     // [新增] 拼写题
+    /** 拼写题 - 根据中文释义拼写英文单词 */
+    SPELLING     
 }
 
-// [新增] 连击状态
+/**
+ * 连击状态数据类
+ * 表示用户当前的连击状态
+ *
+ * @param count 连击次数
+ * @param multiplier 得分倍数
+ * @param showAnimation 是否显示动画
+ */
 data class ComboState(
     val count: Int = 0,
     val multiplier: Float = 1.0f,
     val showAnimation: Boolean = false
 )
 
-// [新增] 拼写题状态
+/**
+ * 拼写题状态数据类
+ * 表示拼写题的当前状态
+ *
+ * @param input 用户输入的文本
+ * @param hintText 提示文本，如 "a _ _ l _"
+ * @param isError 是否输入错误
+ * @param hintCount 已使用的提示次数
+ * @param correctAnswer 正确答案，用于错误时显示
+ */
 data class SpellingState(
     val input: String = "",
-    val hintText: String = "", // 显示如 "a _ _ l _"
+    val hintText: String = "", 
     val isError: Boolean = false,
     val hintCount: Int = 0,
-    val correctAnswer: String = "" // 存储正确答案，用于错误时显示
+    val correctAnswer: String = ""
 )
 
-// --- ViewModel ---
+// --- ViewModel --- 
+/**
+ * 应用程序主视图模型
+ * 管理应用程序的所有业务逻辑和状态
+ * 继承自AndroidViewModel，持有Application上下文
+ * 实现TextToSpeech.OnInitListener接口，处理TTS初始化
+ *
+ * @param application 应用程序上下文
+ */
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
+    // 数据库和仓库实例
     private val db = AppDatabase.getDatabase(application)
     private val repository = WordRepository(db.wordDao(), application)
 
-    // --- 1. 状态变量 ---
+    // --- 1. 状态变量 --- 
+    /** 深色主题状态 */
     private val _isDarkTheme = MutableStateFlow(false)
     val isDarkTheme = _isDarkTheme.asStateFlow()
+    
+    /** 网络连接状态 */
     private val _isOnline = MutableStateFlow(true)
     val isOnline = _isOnline.asStateFlow()
+    
+    /** 文本转语音实例 */
     private var tts: TextToSpeech? = null
+    /** TTS是否准备就绪 */
     private var isTtsReady = false
 
+    /** 当前下载的书籍类型 */
     private val _downloadingBookType = MutableStateFlow<String?>(null)
     val downloadingBookType = _downloadingBookType.asStateFlow()
-    // [修改] 用户类型变为 FirebaseUser
+    
+    /** 当前登录用户 */
     private val _currentUser = MutableStateFlow<FirebaseUser?>(FirebaseAuth.getInstance().currentUser)
     val currentUser = _currentUser.asStateFlow()
     
-    private val auth = FirebaseAuth.getInstance() // [新增] Auth 实例
+    /** Firebase Auth实例 */
+    private val auth = FirebaseAuth.getInstance()
     
-    // [新增] 扩展用户资料状态
+    /** 用户详细资料 */
     private val _userProfile = MutableStateFlow(UserProfile())
     val userProfile = _userProfile.asStateFlow()
     
+    /** 加载状态 */
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
+    
+    /** 状态消息 */
     private val _statusMsg = MutableStateFlow("")
     val statusMsg = _statusMsg.asStateFlow()
+    
+    /** 书架书籍列表 */
     private val _bookList = MutableStateFlow<List<BookModel>>(emptyList())
     val bookList = _bookList.asStateFlow()
+    
+    /** 是否处于学习模式 */
     private val _isLearningMode = MutableStateFlow(false)
     val isLearningMode = _isLearningMode.asStateFlow()
+    
+    /** 当前学习的单词 */
     private val _currentWord = MutableStateFlow<WordEntity?>(null)
     val currentWord = _currentWord.asStateFlow()
+    
+    /** 是否处于复习模式 */
     private val _isReviewingMode = MutableStateFlow(false)
     val isReviewingMode = _isReviewingMode.asStateFlow()
+    
+    /** 已复习的单词列表 */
     private val _reviewedWords = MutableStateFlow<List<WordEntity>>(emptyList())
     val reviewedWords = _reviewedWords.asStateFlow()
+    
+    /** 查词结果 */
     private val _searchResult = MutableStateFlow<SearchResponseItem?>(null)
     val searchResult = _searchResult.asStateFlow()
+    
+    /** 是否正在查词 */
     private val _isSearching = MutableStateFlow(false)
     val isSearching = _isSearching.asStateFlow()
+    
+    /** 是否显示查词对话框 */
     private val _showSearchDialog = MutableStateFlow(false)
     val showSearchDialog = _showSearchDialog.asStateFlow()
+    
+    /** 测验题目列表 */
     private val _quizQuestions = MutableStateFlow<List<Question>>(emptyList())
     val quizQuestions = _quizQuestions.asStateFlow()
+    
+    /** 当前测验题目索引 */
     private val _currentQuizIndex = MutableStateFlow(0)
     val currentQuizIndex = _currentQuizIndex.asStateFlow()
+    
+    /** 测验得分 */
     private val _quizScore = MutableStateFlow(0)
     val quizScore = _quizScore.asStateFlow()
+    
+    /** 测验是否结束 */
     private val _isQuizFinished = MutableStateFlow(false)
     val isQuizFinished = _isQuizFinished.asStateFlow()
+    
+    /** 答案状态：0未回答, 1正确, 2错误 */
     private val _answerState = MutableStateFlow(0)
     val answerState = _answerState.asStateFlow()
+    
+    /** 测验步骤：1选择题库, 2选择模式 */
     private val _quizStep = MutableStateFlow(1)
     val quizStep = _quizStep.asStateFlow()
+    
+    /** 选中的测验书籍类型 */
     private val _quizSelectedBookType = MutableStateFlow("")
     val quizSelectedBookType = _quizSelectedBookType.asStateFlow()
+    
+    /** 用户选择的选项 */
     private val _userSelectedOption = MutableStateFlow("")
     val userSelectedOption = _userSelectedOption.asStateFlow()
 
-    // --- [新增] 扩展状态 ---
+    /** 连击状态 */
     private val _comboState = MutableStateFlow(ComboState())
     val comboState = _comboState.asStateFlow()
 
+    /** 拼写题状态 */
     private val _spellingState = MutableStateFlow(SpellingState())
     val spellingState = _spellingState.asStateFlow()
 
-    private val _timeLeft = MutableStateFlow(15.0f) // 倒计时剩余秒数
+    /** 剩余时间 */
+    private val _timeLeft = MutableStateFlow(15.0f) 
     val timeLeft = _timeLeft.asStateFlow()
-    private val _totalTime = MutableStateFlow(15.0f) // 总时间
+    
+    /** 总时间 */
+    private val _totalTime = MutableStateFlow(15.0f) 
 
+    /** 计时器任务 */
     private var timerJob: Job? = null
-    private val _wrongWords = mutableListOf<WordEntity>() // 本次错题
+    /** 本次测验的错题列表 */
+    private val _wrongWords = mutableListOf<WordEntity>() 
 
-    // 统计数据
+    /** 统计数据 */
+    /** 已学单词数量 */
     val learnedCount: Flow<Int> = db.wordDao().getLearnedCount()
+    /** 总单词数量 */
     val totalCount: Flow<Int> = db.wordDao().getTotalCount()
+    /** 连续打卡天数 */
     private val _streakDays = MutableStateFlow(0)
     val streakDays = _streakDays.asStateFlow()
+    /** 今日学习单词数 */
     private val _dailyCount = MutableStateFlow(0)
     val dailyCount = _dailyCount.asStateFlow()
 
-    // 【关键变量】每日目标
+    /** 每日目标 */
     private val _dailyGoal = MutableStateFlow(20)
     val dailyGoal = _dailyGoal.asStateFlow()
 
+    /** 学习列表 */
     private var learningList: List<WordEntity> = emptyList()
+    /** 媒体播放器 */
     private var mediaPlayer: MediaPlayer? = null
 
+    /**
+     * 初始化方法
+     * 初始化主题、书架、每日统计、网络监听和TTS
+     */
     init {
         initTheme()
         refreshBookshelf()
@@ -173,7 +282,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         initNetworkMonitor()
         tts = TextToSpeech(application, this)
         
-        // [新增] 监听 currentUser 变化，登录成功后拉取详细资料
+        // 监听 currentUser 变化，登录成功后拉取详细资料
         viewModelScope.launch {
             currentUser.collect { user ->
                 if (user != null) {
@@ -185,27 +294,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
-    // --- 主题逻辑 ---
+    // --- 主题逻辑 --- 
+    /**
+     * 初始化主题
+     * 从SharedPreferences读取主题设置
+     */
     private fun initTheme() {
         val prefs = getApplication<Application>().getSharedPreferences("app_config", Context.MODE_PRIVATE)
         _isDarkTheme.value = prefs.getBoolean("is_dark_theme", false)
     }
 
+    /**
+     * 切换主题
+     *
+     * @param isDark 是否为深色主题
+     */
     fun toggleTheme(isDark: Boolean) {
         _isDarkTheme.value = isDark
         getApplication<Application>().getSharedPreferences("app_config", Context.MODE_PRIVATE)
             .edit().putBoolean("is_dark_theme", isDark).apply()
     }
 
-    // --- TTS 初始化 ---
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val result = tts?.setLanguage(Locale.US)
-            isTtsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
-        }
-    }
-
-    // --- 网络监听 ---
+    /**
+     * 初始化网络监听
+     * 监听设备网络连接状态变化
+     */
     private fun initNetworkMonitor() {
         val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val request = NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build()
@@ -215,7 +328,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         })
     }
 
-    // --- 播放音频 ---
+    /**
+     * 播放音频
+     * 优先使用网络音频，失败则使用TTS
+     *
+     * @param url 音频URL
+     * @param wordText 单词文本，用于TTS
+     */
     fun playAudio(url: String, wordText: String? = null) {
         if (!_isOnline.value || url.isBlank()) {
             playTTS(wordText)
@@ -237,12 +356,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 播放TTS
+     *
+     * @param text 要朗读的文本
+     */
     private fun playTTS(text: String?) {
         if (isTtsReady && !text.isNullOrBlank()) {
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
         }
     }
 
+    /**
+     * TTS初始化回调
+     *
+     * @param status 初始化状态
+     */
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val result = tts?.setLanguage(Locale.US)
+            isTtsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+        }
+    }
+
+    /**
+     * 组件销毁时调用
+     * 释放资源
+     */
     override fun onCleared() {
         super.onCleared()
         mediaPlayer?.release()
@@ -250,6 +390,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         tts?.shutdown()
     }
 
+    /**
+     * 触发振动
+     * 正确时短振动，错误时长振动
+     *
+     * @param isCorrect 答案是否正确
+     */
     private fun triggerVibration(isCorrect: Boolean) {
         val context = getApplication<Application>()
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -277,18 +423,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
-    // ================= 核心业务逻辑 =================
+    // ================= 测验逻辑 =================
 
+    /**
+     * 选择测验书籍
+     *
+     * @param bt 书籍类型
+     */
     fun selectQuizBook(bt: String) {
         _quizSelectedBookType.value = bt
         _quizStep.value = 2
     }
 
+    /**
+     * 返回书架选择
+     */
     fun backToBookSelection() {
         _quizStep.value = 1
         _quizSelectedBookType.value = ""
     }
 
+    /**
+     * 开始测验
+     * 生成测验题目，重置状态
+     *
+     * @param mode 测验模式
+     */
     fun startQuiz(mode: Int) {
         val bookType = _quizSelectedBookType.value
         if (bookType.isEmpty()) return
@@ -301,18 +461,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
 
             val quizWords = allWords.shuffled().take(10)
-            // 修改题目生成逻辑，支持拼写
+            // 生成题目
             val questions = quizWords.map { target ->
                 val qType = when(mode) {
-                    4 -> QuizType.SPELLING // [新增] 模式4为拼写
+                    4 -> QuizType.SPELLING // 模式4为拼写
                     1 -> QuizType.EN_TO_CN
                     2 -> QuizType.CN_TO_EN
                     3 -> QuizType.AUDIO_TO_CN
                     else -> QuizType.values().random()
                 }
                 
-                // 如果是拼写题，options 可以为空，或者作为干扰项(如果做键盘)
-                // 这里为了简单，拼写题 options 留空
+                // 如果是拼写题，options 留空
                 val options = if (qType == QuizType.SPELLING) emptyList() else {
                     val distractors = allWords.filter { it.id != target.id }.shuffled().take(3)
                     if (qType == QuizType.CN_TO_EN) {
@@ -324,6 +483,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 Question(target, options, qType)
             }
 
+            // 重置测验状态
             _quizQuestions.value = questions
             _currentQuizIndex.value = 0
             _quizScore.value = 0
@@ -333,9 +493,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             _wrongWords.clear()
             _isQuizFinished.value = false
             
-            startTimer() // [新增] 开始倒计时
-            initSpellingState(questions[0]) // [新增] 初始化拼写
+            startTimer() // 开始倒计时
+            initSpellingState(questions[0]) // 初始化拼写
 
+            // 如果是听音选义题，自动播放音频
             if (questions.isNotEmpty() && questions[0].type == QuizType.AUDIO_TO_CN) {
                 delay(500)
                 playAudio(questions[0].targetWord.audio, questions[0].targetWord.word)
@@ -343,6 +504,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 回答选择题
+     *
+     * @param opt 用户选择的选项
+     */
     fun answerQuestion(opt: String) {
         if (_answerState.value != 0) return
 
@@ -358,6 +524,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             opt == q.targetWord.cn
         }
 
+        // 处理答案
         if (correct) {
             processCorrectAnswer()
         } else {
@@ -369,11 +536,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         timerJob?.cancel() // 停止计时
     }
 
+    /**
+     * 进入下一题
+     */
     fun nextQuestion() {
         val index = _currentQuizIndex.value
         val qs = _quizQuestions.value
 
         if (index < qs.size - 1) {
+            // 还有下一题
             _currentQuizIndex.value += 1
             _answerState.value = 0
             _userSelectedOption.value = ""
@@ -383,21 +554,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 playAudio(nextQ.targetWord.audio, nextQ.targetWord.word)
             }
             
-            // 在切换题目时，重置拼写和计时
+            // 重置拼写和计时
             startTimer()
             initSpellingState(nextQ)
         } else {
+            // 测验结束
             _isQuizFinished.value = true
         }
     }
 
+    /**
+     * 退出测验
+     */
     fun quitQuiz() {
         _quizQuestions.value = emptyList()
         mediaPlayer?.release()
         timerJob?.cancel() // 取消计时
     }
 
-    // --- [新增] 倒计时逻辑 ---
+    /**
+     * 开始倒计时
+     */
     private fun startTimer() {
         timerJob?.cancel()
         _timeLeft.value = 15.0f // 每题15秒
@@ -412,6 +589,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 处理超时
+     * 超时视为错误
+     */
     private fun handleTimeout() {
         _answerState.value = 2 // 视为错误
         _comboState.value = ComboState(0, 1.0f) // 连击断裂
@@ -420,7 +601,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         currentQ?.let { _wrongWords.add(it.targetWord) }
     }
 
-    // --- [新增] 拼写逻辑 ---
+    /**
+     * 初始化拼写题状态
+     *
+     * @param q 题目
+     */
     private fun initSpellingState(q: Question) {
         if (q.type == QuizType.SPELLING) {
             // 初始化提示，全部显示为 _
@@ -434,10 +619,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 更新拼写输入
+     *
+     * @param input 用户输入
+     */
     fun updateSpellingInput(input: String) {
         _spellingState.value = _spellingState.value.copy(input = input, isError = false)
     }
 
+    /**
+     * 提交拼写答案
+     */
     fun submitSpelling() {
         val currentQ = _quizQuestions.value[_currentQuizIndex.value]
         val input = _spellingState.value.input.trim()
@@ -457,6 +650,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 使用提示
+     */
     fun useHint() {
         val currentQ = _quizQuestions.value[_currentQuizIndex.value]
         val word = currentQ.targetWord.word
@@ -470,11 +666,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 input = newInput,
                 hintCount = _spellingState.value.hintCount + 1
             )
-            // 扣分逻辑可以加在这里
         }
     }
 
-    // --- [新增] 统一的答对处理 ---
+    /**
+     * 处理正确答案
+     */
     private fun processCorrectAnswer() {
         val currentCombo = _comboState.value.count + 1
         // 连击加分公式：基础分10 * (1 + 连击数 * 0.1)
@@ -491,6 +688,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     // ================= 每日打卡逻辑 =================
 
+    /**
+     * 初始化每日统计
+     * 从SharedPreferences读取每日统计数据
+     */
     private fun initDailyStats() {
         val prefs = getApplication<Application>().getSharedPreferences("user_stats", Context.MODE_PRIVATE)
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -508,6 +709,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         _dailyGoal.value = prefs.getInt("daily_goal", 20)
     }
 
+    /**
+     * 增加每日学习进度
+     */
     private fun incrementDailyProgress() {
         val prefs = getApplication<Application>().getSharedPreferences("user_stats", Context.MODE_PRIVATE)
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -523,6 +727,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 更新连续打卡天数
+     *
+     * @param prefs SharedPreferences实例
+     * @param today 今天日期
+     */
     private fun updateStreak(prefs: android.content.SharedPreferences, today: String) {
         val last = prefs.getString("last_streak_date", "") ?: ""
         var streak = prefs.getInt("streak_days", 0)
@@ -550,6 +760,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         Toast.makeText(getApplication(), "🎉 打卡成功！坚持 $streak 天！", Toast.LENGTH_LONG).show()
     }
 
+    /**
+     * 设置每日目标
+     *
+     * @param newGoal 新的每日目标
+     */
     fun setDailyGoal(newGoal: Int) {
         _dailyGoal.value = newGoal
         getApplication<Application>().getSharedPreferences("user_stats", Context.MODE_PRIVATE)
@@ -558,6 +773,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     // ================= 书架与学习逻辑 =================
 
+    /**
+     * 刷新书架
+     * 从SharedPreferences读取书籍下载状态
+     */
     private fun refreshBookshelf() {
         val prefs = getApplication<Application>().getSharedPreferences("app_config", Context.MODE_PRIVATE)
         _bookList.value = listOf(
@@ -570,6 +789,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 下载书籍
+     *
+     * @param book 要下载的书籍
+     */
     fun downloadBook(book: BookModel) {
         if (!_isOnline.value) {
             Toast.makeText(getApplication(), "无网络连接", Toast.LENGTH_SHORT).show()
@@ -589,11 +813,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 Toast.makeText(getApplication(), "失败", Toast.LENGTH_SHORT).show()
             } finally {
                 _downloadingBookType.value = null
-                _statusMsg.value = "" // 【新增】操作结束后，必须清空状态！
+                _statusMsg.value = "" // 操作结束后，清空状态
             }
         }
     }
 
+    /**
+     * 删除书籍
+     *
+     * @param book 要删除的书籍
+     */
     fun deleteBook(book: BookModel) {
         viewModelScope.launch {
             repository.deleteBook(book.type)
@@ -603,13 +832,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
-    // 【已修复/优化】: 使用 Coroutine 替代 RxJava，并调用 Repository 中新的完整删除逻辑
+    /**
+     * 删除账户
+     * 清除本地数据和云端数据
+     */
     fun deleteAccount() {
         _isLoading.value = true
         _statusMsg.value = "正在注销..."
         viewModelScope.launch {
             try {
-                // 1. 删除云端用户和进度 (调用新的 suspend 函数)
+                // 1. 删除云端用户和进度
                 repository.deleteCurrentUserAndProgress()
 
                 // 2. 清除本地数据和状态
@@ -623,7 +855,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 _currentWord.value = null
                 _streakDays.value = 0
                 _dailyCount.value = 0
-                auth.signOut() // [修改] Firebase 退出
+                auth.signOut() // Firebase 退出
                 _currentUser.value = null
                 _statusMsg.value = "已注销"
                 refreshBookshelf()
@@ -637,6 +869,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 开始学习
+     *
+     * @param bookType 书籍类型
+     */
     fun startLearning(bookType: String) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -653,6 +890,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 标记为已知
+     */
     fun markKnown() {
         val w = _currentWord.value ?: return
         viewModelScope.launch {
@@ -663,8 +903,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 标记为未知
+     */
     fun markUnknown() { nextWord() }
 
+    /**
+     * 进入下一个单词
+     */
     private fun nextWord() {
         val list = learningList.toMutableList()
         val cur = _currentWord.value
@@ -677,12 +923,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 退出学习模式
+     */
     fun quitLearning() {
         _isLearningMode.value = false
         _currentWord.value = null
         mediaPlayer?.release()
     }
 
+    /**
+     * 打开复习列表
+     *
+     * @param bt 书籍类型
+     */
     fun openReviewList(bt: String) {
         viewModelScope.launch {
             db.wordDao().getLearnedWords(bt).collect { _reviewedWords.value = it }
@@ -690,10 +944,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         _isReviewingMode.value = true
     }
 
+    /**
+     * 关闭复习列表
+     */
     fun closeReviewList() {
         _isReviewingMode.value = false
     }
 
+    /**
+     * 标记单词为未学
+     *
+     * @param w 要标记的单词
+     */
     fun unlearnWord(w: WordEntity) {
         viewModelScope.launch {
             repository.revertWordStatus(w.bookType, w.id)
@@ -701,6 +963,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     // --- 查词 ---
+    /**
+     * 搜索单词
+     *
+     * @param q 要搜索的单词
+     */
     fun searchWord(q: String) {
         if (q.isBlank()) return
         if (!_isOnline.value) { Toast.makeText(getApplication(), "需要网络", Toast.LENGTH_SHORT).show(); return }
@@ -714,24 +981,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    /**
+     * 关闭查词对话框
+     */
     fun closeSearchDialog() {
         _showSearchDialog.value = false
         _searchResult.value = null
     }
 
     // --- 用户系统 ---
-    // 修改后的 login 函数
+    /**
+     * 登录
+     *
+     * @param u 用户名或邮箱
+     * @param p 密码
+     */
     fun login(u: String, p: String) {
         if (!_isOnline.value) {
             _statusMsg.value = "当前无网络连接"
             return
         }
         
-        // 【修复1】处理用户名：如果用户没输 @，自动加上假后缀
+        // 处理用户名：如果用户没输 @，自动加上假后缀
         val email = if (u.contains("@")) u else "$u@rememberworlds.com"
         
         _isLoading.value = true
-        _statusMsg.value = "正在连接服务器..." // 提示用户正在连接
+        _statusMsg.value = "正在连接服务器..."
 
         auth.signInWithEmailAndPassword(email, p)
             .addOnSuccessListener { result ->
@@ -743,7 +1018,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
             .addOnFailureListener { e ->
                 _isLoading.value = false
-                // 【调试建议】将英文错误翻译成中文提示
                 val errorMsg = when {
                     e.message?.contains("network") == true -> "网络连接失败，请确保开启了VPN"
                     e.message?.contains("password") == true -> "密码错误"
@@ -751,18 +1025,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     else -> "登录失败: ${e.message}"
                 }
                 _statusMsg.value = errorMsg
-                Log.e("AuthError", "Login failed", e) // 在 Logcat 打印详细错误
+                Log.e("AuthError", "Login failed", e)
             }
     }
 
-    // 修改后的 register 函数
+    /**
+     * 注册
+     *
+     * @param u 用户名或邮箱
+     * @param p 密码
+     */
     fun register(u: String, p: String) {
         if (!_isOnline.value) {
             _statusMsg.value = "当前无网络连接"
             return
         }
 
-        // 【修复1】同样处理注册时的邮箱
+        // 处理注册时的邮箱
         val email = if (u.contains("@")) u else "$u@rememberworlds.com"
 
         _isLoading.value = true
@@ -789,11 +1068,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
     }
 
-    // [修改] 退出登录
+    /**
+     * 退出登录
+     */
     fun logout() {
         viewModelScope.launch {
             repository.clearAllData()
-            // ... 清除 SP ...
+            // 清除 SharedPreferences
             getApplication<Application>().getSharedPreferences("app_config", Context.MODE_PRIVATE).edit().clear().apply()
             getApplication<Application>().getSharedPreferences("user_stats", Context.MODE_PRIVATE).edit().clear().apply()
             
@@ -803,14 +1084,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             _streakDays.value = 0
             _dailyCount.value = 0
             
-            auth.signOut() // [修改] Firebase 退出
+            auth.signOut() // Firebase 退出
             _currentUser.value = null
             _statusMsg.value = "已安全退出"
             refreshBookshelf()
         }
     }
 
-    // [新增] 从 Firestore 拉取资料
+    /**
+     * 从 Firestore 拉取用户资料
+     *
+     * @param uid 用户ID
+     */
     private fun fetchUserProfile(uid: String) {
         viewModelScope.launch {
             try {
@@ -827,7 +1112,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     // 如果还没有资料，初始化一份
                     val newProfile = UserProfile(uid = uid, nickname = _currentUser.value?.email?.split("@")?.get(0) ?: "用户")
                     _userProfile.value = newProfile
-                    // 只有在修改时才写入，这里暂时只在本地更新
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -835,7 +1119,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
-    // [新增] 更新某一项资料
+    /**
+     * 更新用户资料字段
+     *
+     * @param field 要更新的字段名
+     * @param value 新的值
+     */
     fun updateProfileField(field: String, value: String) {
         val uid = _currentUser.value?.uid ?: return
         
@@ -848,6 +1137,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             "location" -> current.copy(location = value)
             "school" -> current.copy(school = value)
             "grade" -> current.copy(grade = value)
+            "avatarUrl" -> current.copy(avatarUrl = value)
             else -> current
         }
         _userProfile.value = updated
@@ -866,7 +1156,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
     
-    // [新增] 上传头像功能
+    /**
+     * 上传头像
+     *
+     * @param uri 头像文件URI
+     */
     fun uploadAvatar(uri: Uri) {
         val uid = auth.currentUser?.uid ?: return
         
@@ -896,9 +1190,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
     }
     
+    /**
+     * 翻译错误信息
+     *
+     * @param e 异常
+     * @return 翻译后的错误信息
+     */
     private fun translateError(e: Throwable) = e.message ?: "Error"
     
-    // 添加一个通用的清空方法
+    /**
+     * 清除状态消息
+     */
     fun clearStatusMsg() {
         _statusMsg.value = ""
     }

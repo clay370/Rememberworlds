@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "376515280494",
+    "project_id": "word-7ba66",
+    "storage_bucket": "word-7ba66.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:376515280494:android:ccb7400271d8748880b07f",
+        "android_client_info": {
+          "package_name": "com.example.rememberworlds"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpAeSt4_zqn3XPSoK63DJgmONmWHPDBsw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
