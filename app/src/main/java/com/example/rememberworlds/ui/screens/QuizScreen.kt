@@ -1,5 +1,9 @@
    package com.example.rememberworlds.ui.screens
 
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -8,9 +12,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,6 +28,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import com.example.rememberworlds.ChatMessage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +49,7 @@ import com.example.rememberworlds.BookModel
 import com.example.rememberworlds.MainViewModel
 import com.example.rememberworlds.Question
 import com.example.rememberworlds.QuizType
+import java.util.Locale
 
 /**
  * 测验模式项数据类
@@ -91,26 +99,34 @@ data class QuizModeItem(
  */
 @Composable
 fun QuizScreen(viewModel: MainViewModel) {
-    // 收集测验题目状态
     val questions by viewModel.quizQuestions.collectAsState()
-    
-    // 收集测验是否结束的状态
     val isFinished by viewModel.isQuizFinished.collectAsState()
+    
+    // [修改] 新增一个状态来控制是否显示 AI 聊天界面
+    var showAiChat by remember { mutableStateOf(false) }
 
     Surface(
-        modifier = Modifier
-            .fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        // 根据状态显示不同的视图
-        if (questions.isEmpty()) {
-            // 初始状态：显示测验选择视图
-            QuizSelectionView(viewModel)
+        // [修改] 路由逻辑：优先判断是否显示聊天界面
+        if (showAiChat) {
+            // 显示我们将在第 5 步创建的聊天界面
+            AIChatView(viewModel = viewModel) {
+                showAiChat = false // 点击返回时关闭聊天
+            }
+        } else if (questions.isEmpty()) {
+            // 初始状态：显示选择视图
+            // 我们需要传递一个回调来处理 AI 模式的点击
+            QuizSelectionView(viewModel) { isAiMode ->
+                if (isAiMode) {
+                    viewModel.clearChatHistory() // 进入前清空历史
+                    showAiChat = true
+                }
+            }
         } else if (isFinished) {
-            // 测验结束：显示结果视图
             QuizResultView(viewModel)
         } else {
-            // 测验进行中：显示活跃测验视图
             ActiveQuizView(viewModel)
         }
     }
@@ -124,9 +140,14 @@ fun QuizScreen(viewModel: MainViewModel) {
  * 2. 选择挑战模式
  *
  * @param viewModel 主视图模型
+ * @param onAiModeSelected 点击AI模式时的回调
  */
+// [修改] 增加 onAiModeSelected 回调参数
 @Composable
-fun QuizSelectionView(viewModel: MainViewModel) {
+fun QuizSelectionView(
+    viewModel: MainViewModel,
+    onAiModeSelected: (Boolean) -> Unit = {} // 默认为空以兼容旧代码
+) {
     // 收集书籍列表状态
     val books by viewModel.bookList.collectAsState()
     
@@ -222,6 +243,14 @@ fun QuizSelectionView(viewModel: MainViewModel) {
                     icon = Icons.Default.Star,
                     modeId = 4,
                     color = Color(0xFFEC407A)
+                ),
+                // [新增] AI 模式
+                QuizModeItem(
+                    title = "AI 口语对练",
+                    desc = "与 AI 英语私教实时对话",
+                    icon = Icons.Default.Face,
+                    modeId = 99,
+                    color = Color(0xFF00BCD4)
                 )
             )
             
@@ -231,7 +260,12 @@ fun QuizSelectionView(viewModel: MainViewModel) {
                 // 遍历测验模式列表，为每个模式创建一个选择卡片
                 modes.forEach { mode ->
                     QuizModeSelectionCard(mode) {
-                        viewModel.startQuiz(mode.modeId)
+                        // [修改] 点击处理逻辑
+                        if (mode.modeId == 99) {
+                            onAiModeSelected(true) // 触发 AI 模式
+                        } else {
+                            viewModel.startQuiz(mode.modeId)
+                        }
                     }
                 }
             }
@@ -634,6 +668,163 @@ fun QuizOptionButton(
             fontWeight = FontWeight.Medium,
             maxLines = 1, // 最多显示一行
             overflow = TextOverflow.Ellipsis // 超出部分显示省略号
+        )
+    }
+}
+
+/**
+ * [新增] AI 聊天界面
+ */
+@Composable
+fun AIChatView(viewModel: MainViewModel, onBack: () -> Unit) {
+    val chatHistory by viewModel.chatHistory.collectAsState()
+    val isThinking by viewModel.isAiThinking.collectAsState()
+    
+    // 语音识别启动器：将语音转换为文字
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val data = result.data
+            // 获取识别结果
+            val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val spokenText = results?.get(0)
+            if (!spokenText.isNullOrEmpty()) {
+                // 发送给 AI
+                viewModel.sendMessageToAI(spokenText)
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        // 1. 顶部标题栏
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.Close, contentDescription = "退出")
+            }
+            Text(
+                "AI 英语私教",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
+
+        // 2. 聊天消息列表
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            reverseLayout = false
+        ) {
+            items(chatHistory) { msg ->
+                ChatBubble(msg)
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            
+            if (isThinking) {
+                item {
+                    Text(
+                        "AI 正在思考...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, top = 8.dp)
+                    )
+                }
+            }
+        }
+
+        // 3. 底部录音按钮
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 16.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Button(
+                onClick = {
+                    // 启动系统语音识别
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toString()) // 强制识别英语
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Say something in English...")
+                    }
+                    try {
+                        speechRecognizerLauncher.launch(intent)
+                    } catch (e: Exception) {
+                        // 如果设备不支持，这里可以弹个Toast
+                    }
+                },
+                modifier = Modifier.size(72.dp),
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                elevation = ButtonDefaults.buttonElevation(8.dp)
+            ) {
+                Icon(
+                    Icons.Default.Face,
+                    contentDescription = "按住说话",
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        Text(
+            "点击麦克风练习口语",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+    }
+}
+
+/**
+ * [新增] 聊天气泡组件
+ */
+@Composable
+fun ChatBubble(message: ChatMessage) {
+    val isUser = message.isUser
+    val align = if (isUser) Alignment.End else Alignment.Start
+    
+    // 气泡颜色
+    val bubbleColor = if (isUser)
+        MaterialTheme.colorScheme.primaryContainer
+    else
+        MaterialTheme.colorScheme.surfaceVariant
+        
+    val textColor = if (isUser)
+        MaterialTheme.colorScheme.onPrimaryContainer
+    else
+        MaterialTheme.colorScheme.onSurfaceVariant
+
+    // 气泡形状：让尖角指向对应的方向
+    val bubbleShape = if (isUser)
+        RoundedCornerShape(16.dp, 16.dp, 2.dp, 16.dp)
+    else
+        RoundedCornerShape(16.dp, 16.dp, 16.dp, 2.dp)
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = align
+    ) {
+        Surface(
+            color = bubbleColor,
+            shape = bubbleShape,
+            shadowElevation = 1.dp,
+            modifier = Modifier.widthIn(max = 280.dp)
+        ) {
+            Text(
+                text = message.text,
+                modifier = Modifier.padding(12.dp),
+                color = textColor,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        // 显示角色名
+        Text(
+            text = if (isUser) "Me" else "AI Teacher",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp)
         )
     }
 }

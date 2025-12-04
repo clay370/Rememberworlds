@@ -86,4 +86,7 @@ dependencies {
 
     // [新增] Coil 图片加载库 (用于显示头像)
     implementation("io.coil-kt:coil-compose:2.6.0")
+    
+    // [新增] Google AI SDK (Gemini) 用于对话功能
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 }

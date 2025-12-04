@@ -20,6 +20,9 @@ import com.example.rememberworlds.data.db.AppDatabase
 import com.example.rememberworlds.data.db.WordEntity
 import com.example.rememberworlds.data.network.SearchResponseItem
 import com.example.rememberworlds.data.repository.WordRepository
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.content
+import com.google.ai.client.generativeai.type.generationConfig
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.storage.FirebaseStorage
@@ -36,6 +39,7 @@ import android.net.Uri
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 // --- 数据模型 --- 
@@ -112,6 +116,14 @@ data class SpellingState(
     val isError: Boolean = false,
     val hintCount: Int = 0,
     val correctAnswer: String = ""
+)
+
+// [新增] 聊天消息数据类
+data class ChatMessage(
+    val id: String = UUID.randomUUID().toString(),
+    val text: String,
+    val isUser: Boolean, // true表示用户说的，false表示AI说的
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 // --- ViewModel --- 
@@ -270,6 +282,90 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private var learningList: List<WordEntity> = emptyList()
     /** 媒体播放器 */
     private var mediaPlayer: MediaPlayer? = null
+    
+    // ================= [新增] AI 对话功能开始 =================
+    
+    // 聊天记录列表
+    private val _chatHistory = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatHistory = _chatHistory.asStateFlow()
+    
+    // AI 是否正在思考中
+    private val _isAiThinking = MutableStateFlow(false)
+    val isAiThinking = _isAiThinking.asStateFlow()
+    
+    // 初始化 Gemini 模型
+    // ⚠️ 请将下面的 "YOUR_API_KEY_HERE" 替换为你第一步获取的 API Key
+    private val generativeModel = GenerativeModel(
+        modelName = "gemini-1.5-flash",
+        apiKey = "AIzaSyCFPuBDiKIgBDQnthw1cBOTvW1S6f9ZzJI",
+        generationConfig = generationConfig {
+            temperature = 0.7f // 控制回答的创造性，0.7比较自然
+        }
+    )
+    
+    // 维护与 AI 的历史上下文（让它记得你之前说过的话）
+    private val aiContextHistory = mutableListOf<com.google.ai.client.generativeai.type.Content>()
+    
+    /**
+     * 发送消息给 AI
+     */
+    fun sendMessageToAI(userMessage: String) {
+        if (userMessage.isBlank()) return
+        
+        // 1. 将用户的消息显示在界面上
+        val userMsg = ChatMessage(text = userMessage, isUser = true)
+        _chatHistory.value += userMsg
+        
+        viewModelScope.launch {
+            _isAiThinking.value = true
+            try {
+                // 2. 如果是第一句话，给 AI 一个设定（系统提示词）
+                if (aiContextHistory.isEmpty()) {
+                    // 这是一个"系统提示"，告诉 AI 扮演什么角色
+                    // 我们不直接发给 chat，而是作为第一条历史记录构建 chat 对象
+                }
+                
+                // 3. 启动对话会话
+                val chat = generativeModel.startChat(aiContextHistory)
+                
+                // 4. 发送带有"英语老师"人设的提示
+                // 这里我们通过拼接字符串简单实现人设，或者依靠上面的 history
+                val prompt = if (aiContextHistory.isEmpty()) {
+                    "You are a helpful English speaking partner. Please correct my grammar if I make mistakes, and keep the conversation casual. User says: $userMessage"
+                } else {
+                    userMessage
+                }
+                
+                val response = chat.sendMessage(prompt)
+                val aiResponseText = response.text ?: "I didn't understand that."
+                
+                // 5. 将 AI 的回复显示在界面上
+                val aiMsg = ChatMessage(text = aiResponseText, isUser = false)
+                _chatHistory.value += aiMsg
+                
+                // 6. 更新上下文历史（Gemini SDK 的 chat 对象会自动管理，但我们需要同步给下次 startChat）
+                aiContextHistory.add(content("user") { text(userMessage) })
+                aiContextHistory.add(content("model") { text(aiResponseText) })
+                
+                // 7. [重要] 朗读 AI 的回复 (复用你现有的 TTS 功能)
+                playTTS(aiResponseText)
+                
+            } catch (e: Exception) {
+                _chatHistory.value += ChatMessage(text = "Error: ${e.localizedMessage}", isUser = false)
+            } finally {
+                _isAiThinking.value = false
+            }
+        }
+    }
+    
+    /**
+     * 清空聊天记录
+     */
+    fun clearChatHistory() {
+        _chatHistory.value = emptyList()
+        aiContextHistory.clear()
+    }
+    // ================= [新增] AI 对话功能结束 =================
 
     /**
      * 初始化方法
