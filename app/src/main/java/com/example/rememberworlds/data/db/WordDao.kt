@@ -163,4 +163,17 @@ interface WordDao {
      */
     @Query("SELECT COUNT(*) FROM word_table WHERE isFavorite = 1")
     fun getFavoriteCount(): Flow<Int>
+
+    /**
+     * 获取所有错题 (Mistake Notebook)
+     * 按ID降序排列
+     */
+    @Query("SELECT * FROM word_table WHERE isWrong = 1 ORDER BY id DESC")
+    suspend fun getMistakeWords(): List<WordEntity>
+
+    /**
+     * 更新单词的错题状态
+     */
+    @Query("UPDATE word_table SET isWrong = :isWrong WHERE id = :wordId")
+    suspend fun updateIsWrong(wordId: Int, isWrong: Boolean)
 }

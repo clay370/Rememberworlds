@@ -571,6 +571,7 @@ fun LearningView(viewModel: MainViewModel) {
     val currentWord by viewModel.currentWord.collectAsState() // 当前要学习的单词
     val isLoading by viewModel.isLoading.collectAsState() // 加载状态
     val currentBookProgress by viewModel.currentBookProgress.collectAsState() // 学习进度
+    val learningBookType by viewModel.learningBookType.collectAsState()
 
     // 局部状态管理
     var rotationState by remember {
@@ -646,19 +647,31 @@ fun LearningView(viewModel: MainViewModel) {
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 收藏按钮
-                val isFavorite = currentWord?.isFavorite == true
-                IconButton(
-                    onClick = { viewModel.toggleFavorite() }
-                ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "收藏",
-                        tint = if (isFavorite) Color.Red else MaterialTheme.colorScheme.onBackground
-                    )
+                // 收藏按钮 (仅在非收藏本显示)
+                if (learningBookType != "favorite") {
+                    val isFavorite = currentWord?.isFavorite == true
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(end = 12.dp)
+                    ) {
+                        IconButton(
+                            onClick = { viewModel.toggleFavorite() },
+                            modifier = Modifier.size(24.dp) // Smaller icon button to fit text below
+                        ) {
+                            Icon(
+                                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "收藏",
+                                tint = if (isFavorite) Color.Red else MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Text(
+                            text = "收藏",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
                 }
-                
-                Spacer(modifier = Modifier.width(8.dp))
 
                 Text(
                     text = "自动发音",

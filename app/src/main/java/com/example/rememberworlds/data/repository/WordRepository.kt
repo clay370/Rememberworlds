@@ -412,4 +412,20 @@ class WordRepository(
         withContext(Dispatchers.IO) {
             wordDao.updateIsFavorite(wordId, isFavorite)
         }
+
+    /**
+     * 获取所有错题
+     */
+    suspend fun getMistakeWords() = 
+        withContext(Dispatchers.IO) {
+            wordDao.getMistakeWords()
+        }
+
+    /**
+     * 标记单词为错题
+     */
+    suspend fun markAsWrong(wordId: Int) = 
+        withContext(Dispatchers.IO) {
+            wordDao.updateIsWrong(wordId, true)
+        }
 }

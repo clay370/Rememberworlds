@@ -138,6 +138,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 name = "收藏单词本",
                 category = "我的单词本",
                 isDownloaded = true // 默认为已存在
+            ),
+            BookModel(
+                bookId = "mistake",
+                name = "错词本",
+                category = "我的单词本",
+                isDownloaded = true // 默认为已存在
             )
         )
     )
@@ -882,11 +888,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             try {
 
                 // 1. 尝试获取未学过的单词
-                val unlearnedWords = if (bookType == "favorite") {
-                    // 对于收藏本，直接获取所有收藏单词 (收藏本通常是复习用的，所以加载所有)
-                    repository.getFavoriteWords()
-                } else {
-                    db.wordDao().getUnlearnedWordsList(bookType)
+                val unlearnedWords = when (bookType) {
+                    "favorite" -> repository.getFavoriteWords()
+                    "mistake" -> repository.getMistakeWords()
+                    else -> db.wordDao().getUnlearnedWordsList(bookType)
                 }
                 
                 if (unlearnedWords.isNotEmpty()) {
@@ -896,6 +901,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 } else {
                     if (bookType == "favorite") {
                         Toast.makeText(getApplication(), "暂无收藏单词", Toast.LENGTH_SHORT).show()
+                        quitLearning()
+                    } else if (bookType == "mistake") {
+                        Toast.makeText(getApplication(), "暂无错词", Toast.LENGTH_SHORT).show()
                         quitLearning()
                     } else {
                         // 全部学完：进入复习模式 (加载所有单词)
@@ -954,14 +962,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     
     /**
      * 标记当前单词为"不认识"
-     * 暂时跳过该单词，不记录进度
+     * 标记为错题并保存到数据库，暂时跳过该单词
      */
     fun markUnknown() {
-        // 标记为不认识，暂时跳过
         val word = _currentWord.value ?: return
-        val index = learningList.indexOf(word)
-        if (index < learningList.size - 1) {
-            _currentWord.value = learningList[index + 1]
+        
+        viewModelScope.launch {
+            // 标记为错题
+            repository.markAsWrong(word.id)
+            
+            // 移动到下一个
+            val index = learningList.indexOf(word)
+            if (index < learningList.size - 1) {
+                _currentWord.value = learningList[index + 1]
+            } else {
+                Toast.makeText(getApplication(), "本组单词已学完", Toast.LENGTH_SHORT).show()
+                quitLearning()
+            }
         }
     }
     
@@ -992,13 +1009,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             learningList = learningList.map { 
                 if (it.id == word.id) it.copy(isFavorite = newStatus) else it 
             }
+
+            // Show feedback
+            val msg = if (newStatus) "已加入收藏" else "已取消收藏"
+            Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
         }
     }
 
     /**
      * 删除已下载的书籍
      * 移除本地数据库中的相关单词数据
-     *
      * @param type 书籍类型ID
      */
     fun deleteBook(type: String) {
@@ -1147,6 +1167,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     // --- 学习进度条 ---
     private val _learningBookType = MutableStateFlow("")
+    val learningBookType = _learningBookType.asStateFlow()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val currentBookProgress = _learningBookType.flatMapLatest { type ->
