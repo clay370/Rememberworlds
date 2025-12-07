@@ -396,4 +396,20 @@ class WordRepository(
      */
     fun getLearnedWords(bookType: String) = 
         wordDao.getLearnedWords(bookType)
+
+    /**
+     * 获取所有收藏的单词
+     */
+    suspend fun getFavoriteWords() = 
+        withContext(Dispatchers.IO) {
+            wordDao.getFavoriteWords()
+        }
+
+    /**
+     * 切换单词的收藏状态
+     */
+    suspend fun toggleFavorite(wordId: Int, isFavorite: Boolean) = 
+        withContext(Dispatchers.IO) {
+            wordDao.updateIsFavorite(wordId, isFavorite)
+        }
 }

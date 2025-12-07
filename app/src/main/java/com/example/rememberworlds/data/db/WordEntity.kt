@@ -63,6 +63,12 @@ data class WordEntity(
      * 默认值为0
      */
     var wrongCount: Int = 0,
+    
+    /**
+     * 该单词是否被收藏
+     * 默认值为false
+     */
+    var isFavorite: Boolean = false,
 
     // --- 新增字段 (Rich Data) ---
 

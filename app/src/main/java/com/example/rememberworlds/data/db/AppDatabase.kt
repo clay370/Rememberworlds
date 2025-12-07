@@ -10,7 +10,7 @@ import androidx.room.RoomDatabase
  * 管理单词实体的存储和访问
  */
 // 数据库注解：指定实体类、版本号和是否导出Schema
-@Database(entities = [WordEntity::class], version = 3, exportSchema = false)
+@Database(entities = [WordEntity::class], version = 4, exportSchema = false)
 @androidx.room.TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     /**

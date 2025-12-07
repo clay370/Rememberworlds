@@ -144,4 +144,23 @@ interface WordDao {
      */
     @Query("SELECT COUNT(*) FROM word_table")
     fun getTotalCount(): Flow<Int>
+
+    /**
+     * 获取所有收藏的单词
+     * 按ID降序排列
+     */
+    @Query("SELECT * FROM word_table WHERE isFavorite = 1 ORDER BY id DESC")
+    suspend fun getFavoriteWords(): List<WordEntity>
+
+    /**
+     * 更新单词的收藏状态
+     */
+    @Query("UPDATE word_table SET isFavorite = :isFavorite WHERE id = :wordId")
+    suspend fun updateIsFavorite(wordId: Int, isFavorite: Boolean)
+
+    /**
+     * 获取收藏单词的数量
+     */
+    @Query("SELECT COUNT(*) FROM word_table WHERE isFavorite = 1")
+    fun getFavoriteCount(): Flow<Int>
 }
