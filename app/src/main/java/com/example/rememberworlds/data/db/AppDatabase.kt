@@ -10,7 +10,8 @@ import androidx.room.RoomDatabase
  * 管理单词实体的存储和访问
  */
 // 数据库注解：指定实体类、版本号和是否导出Schema
-@Database(entities = [WordEntity::class], version = 1, exportSchema = false)
+@Database(entities = [WordEntity::class], version = 3, exportSchema = false)
+@androidx.room.TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     /**
      * 获取单词数据访问对象(DAO)
@@ -43,7 +44,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,  // 使用应用程序上下文，避免内存泄漏
                     AppDatabase::class.java,       // 数据库类
                     "word_app_database"           // 数据库名称
-                ).build()
+                )
+                .fallbackToDestructiveMigration() // 允许破坏性迁移（开发阶段）
+                .build()
                 // 更新INSTANCE引用
                 INSTANCE = instance
                 // 返回新创建的实例

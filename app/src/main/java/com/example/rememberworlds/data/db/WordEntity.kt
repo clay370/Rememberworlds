@@ -8,7 +8,10 @@ import androidx.room.PrimaryKey
  * 表示应用程序中的一个单词记录
  */
 // Entity注解：指定数据库表名
-@Entity(tableName = "word_table")
+@Entity(
+    tableName = "word_table",
+    indices = [androidx.room.Index(value = ["bookType", "id"], unique = true)]
+)
 data class WordEntity(
     /**
      * 本地自增主键
@@ -59,5 +62,18 @@ data class WordEntity(
      * 该单词的错误次数统计
      * 默认值为0
      */
-    var wrongCount: Int = 0
+    var wrongCount: Int = 0,
+
+    // --- 新增字段 (Rich Data) ---
+
+    /**
+     * 单词的全局唯一ID (例如: "PEPChuZhong7_2_18")
+     */
+    val wordId: String = "",
+
+    /**
+     * 单词的详细富文本内容 (JSON对象)
+     * Room将使用Converters将其存储为JSON字符串
+     */
+    val detailedContent: com.example.rememberworlds.data.model.WordDetailContent? = null
 )

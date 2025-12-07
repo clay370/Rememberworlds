@@ -111,6 +111,32 @@ interface WordDao {
     fun getLearnedCount(): Flow<Int>
 
     /**
+     * 重置所有单词的学习状态
+     * 将所有单词的 isLearned 标记设为 false
+     * 用于切换用户时清除上一用户的进度
+     */
+    @Query("UPDATE word_table SET isLearned = 0")
+    suspend fun resetAllProgress()
+
+    /**
+     * 获取指定书籍下的单词总数
+     */
+    @Query("SELECT COUNT(*) FROM word_table WHERE bookType = :type")
+    fun getBookTotalCount(type: String): Flow<Int>
+
+    /**
+     * 获取指定书籍下已学单词数量
+     */
+    @Query("SELECT COUNT(*) FROM word_table WHERE bookType = :type AND isLearned = 1")
+    fun getBookLearnedCount(type: String): Flow<Int>
+
+    /**
+     * 获取所有已学单词（跨书籍）
+     */
+    @Query("SELECT * FROM word_table WHERE isLearned = 1 ORDER BY id DESC")
+    suspend fun getAllLearnedWords(): List<WordEntity>
+
+    /**
      * 获取数据库中所有单词的总数
      * 返回Flow以便实时监听统计数据变化
      *

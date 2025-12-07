@@ -32,6 +32,7 @@ class WordRepository(
      * Firebase Auth认证实例
      */
     private val auth = FirebaseAuth.getInstance()
+    private val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
 
     /**
      * 同步用户学习进度
@@ -87,6 +88,9 @@ class WordRepository(
         wordId: Int
     ) = 
         withContext(Dispatchers.IO) {
+            // 1. 本地立即更新状态
+            wordDao.markWordsAsLearned(bookType, listOf(wordId))
+
             // 检查用户是否已登录，未登录则直接返回
             val user = auth.currentUser 
                 ?: return@withContext
@@ -202,86 +206,130 @@ class WordRepository(
             }
         }
 
+
     /**
-     * 检查单词书更新
-     * 从Firestore的VersionControl集合查询最新版本信息
-     * 如果云端版本高于本地版本，则下载并更新本地数据库
+     * 获取所有可用书籍
+     * 从Firestore获取书籍列表，并尝试从本地缓存加载以作为备选
      *
-     * @param bookType 书籍类型标识符
-     * @return 是否成功更新
+     * @return 书籍模型列表
      */
-    suspend fun checkUpdate(bookType: String): Boolean = 
+    suspend fun fetchAvailableBooks(): List<com.example.rememberworlds.data.model.BookModel> =
         withContext(Dispatchers.IO) {
-            var isUpdated = false
-            
             try {
-                // 查询VersionControl集合中指定书籍的版本信息
-                val snapshot = db.collection("VersionControl")
-                    .whereEqualTo("book_type", bookType)
-                    .get()
-                    .await()
-
-                if (!snapshot.isEmpty) {
-                    // 获取第一个文档（应该只有一个）
-                    val doc = snapshot.documents[0]
-                    
-                    // 云端版本号
-                    val cloudVersion = doc.getLong("version_code")?.toInt() ?: 0
-                    
-                    // 单词数据JSON下载URL
-                    val downloadUrl = doc.getString("json_url") ?: ""
-
-                    // 获取本地存储的版本号
-                    val prefs = context.getSharedPreferences(
-                        "app_config", 
-                        Context.MODE_PRIVATE
-                    )
-                    
-                    val localVersion = prefs.getInt("version_$bookType", 0)
-
-                    // 如果云端版本高于本地版本且下载URL有效
-                    if (cloudVersion > localVersion && downloadUrl.isNotEmpty()) {
-                        // 下载最新的单词数据
-                        val jsonList = NetworkModule.api.downloadWords(downloadUrl)
-                        
-                        // 转换为本地数据库实体
-                        val entityList = jsonList.map { 
-                            json ->
-                            WordEntity(
-                                id = json.id, 
-                                word = json.word, 
-                                cn = json.cn, 
-                                audio = json.audio, 
-                                bookType = bookType
-                            )
-                        }
-                        
-                        // 清空本地该书籍的所有数据
-                        wordDao.clearBook(bookType)
-                        
-                        // 插入新下载的数据
-                        wordDao.insertAll(entityList)
-                        
-                        // 更新本地版本号
-                        prefs.edit()
-                            .putInt("version_$bookType", cloudVersion)
-                            .apply()
-                        
-                        // 同步学习进度
-                        syncUserProgress(bookType)
-                        
-                        // 更新成功标志
-                        isUpdated = true
-                    }
-                }
+                val snapshot = db.collection("books").get().await()
+                val books = snapshot.toObjects(com.example.rememberworlds.data.model.BookModel::class.java)
+                
+                // Cache the results
+                saveBooksToCache(books)
+                
+                books
             } catch (e: Exception) {
-                // 打印异常信息
-                e.printStackTrace() 
+                e.printStackTrace()
+                // Return cached books if network fails, or empty list
+                getCachedBooks()
+            }
+        }
+        
+    private fun saveBooksToCache(books: List<com.example.rememberworlds.data.model.BookModel>) {
+        try {
+            val json = com.google.gson.Gson().toJson(books)
+            context.getSharedPreferences("app_cache", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("cached_books", json)
+                .apply()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    
+    fun getCachedBooks(): List<com.example.rememberworlds.data.model.BookModel> {
+        try {
+            val json = context.getSharedPreferences("app_cache", android.content.Context.MODE_PRIVATE)
+                .getString("cached_books", null)
+            if (json != null) {
+                val type = object : com.google.gson.reflect.TypeToken<List<com.example.rememberworlds.data.model.BookModel>>() {}.type
+                return com.google.gson.Gson().fromJson(json, type)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        
+        // Return default list for first run if cache is empty
+        return listOf(
+            com.example.rememberworlds.data.model.BookModel("cet4", "四级词汇", "大学英语", parts = listOf("cet4")),
+            com.example.rememberworlds.data.model.BookModel("cet6", "六级词汇", "大学英语", parts = listOf("cet6")),
+            com.example.rememberworlds.data.model.BookModel("kaoyan", "考研词汇", "研究生入学", parts = listOf("kaoyan")),
+            com.example.rememberworlds.data.model.BookModel("toefl", "托福词汇", "出国留学", parts = listOf("toefl")),
+            com.example.rememberworlds.data.model.BookModel("ielts", "雅思词汇", "出国留学", parts = listOf("ielts")),
+            com.example.rememberworlds.data.model.BookModel("gre", "GRE词汇", "出国留学", parts = listOf("gre")),
+            com.example.rememberworlds.data.model.BookModel("tem4", "专四词汇", "英语专业", parts = listOf("tem4")),
+            com.example.rememberworlds.data.model.BookModel("tem8", "专八词汇", "英语专业", parts = listOf("tem8"))
+        )
+    }
+
+    /**
+     * 下载并导入书籍
+     * 支持分卷下载 (Multi-part)，下载ZIP后自动解压并导入JSON数据
+     *
+     * @param book 书籍对象
+     * @param onProgress 进度回调函数
+     * @return 下载是否成功
+     */
+    suspend fun downloadBook(
+        book: com.example.rememberworlds.data.model.BookModel,
+        onProgress: (String) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        val tempDir = java.io.File(context.cacheDir, "book_temp")
+        if (!tempDir.exists()) tempDir.mkdirs()
+        
+        try {
+            // Clear previous data for this book to avoid duplication if re-downloading
+            // We use book.bookId as the identifier.
+            wordDao.clearBook(book.bookId)
+
+            val parts = if (book.parts.isNotEmpty()) book.parts else listOf(book.type) // Fallback if parts empty? No, checking parts is enough.
+            
+            // If parts is empty but we have a storagePath (legacy), handle that? 
+            // The new guide says stick to 'parts'. But let's handle if parts is used.
+            val downloadTargets = if (book.parts.isNotEmpty()) book.parts else emptyList()
+
+            downloadTargets.forEachIndexed { index, path ->
+                onProgress("正在下载第 ${index + 1}/${downloadTargets.size} 部分...")
+                
+                val targetFile = java.io.File(tempDir, "temp_${System.currentTimeMillis()}.zip")
+                val storageRef = storage.reference.child(path)
+                
+                // Download to file
+                storageRef.getFile(targetFile).await()
+                
+                onProgress("正在解压第 ${index + 1} 部分...")
+                val unzippedFiles = com.example.rememberworlds.utils.ZipUtils.unzip(targetFile, tempDir)
+                
+                onProgress("正在导入数据...")
+                // Find JSON files
+                for (file in unzippedFiles) {
+                    if (file.extension.equals("json", ignoreCase = true)) {
+                        java.io.FileInputStream(file).use { stream ->
+                           com.example.rememberworlds.utils.JsonImporter.importJsonData(stream, wordDao, book.bookId)
+                        }
+                    }
+                    file.delete() // Clean up extracted file
+                }
+                targetFile.delete() // Clean up zip
             }
             
-            // 返回更新结果
-            return@withContext isUpdated
+            // Mark as learned? No, default is false.
+            // Sync progress if user logged in
+            syncUserProgress(book.bookId)
+            
+            return@withContext true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return@withContext false
+        } finally {
+            tempDir.deleteRecursively()
         }
+    }
     
     /**
      * 在线查词功能
@@ -328,6 +376,15 @@ class WordRepository(
     suspend fun clearAllData() = 
         withContext(Dispatchers.IO) {
             wordDao.deleteAll()
+        }
+
+    /**
+     * 重置本地所有学习进度
+     * 将所有单词的 isLearned 设为 false
+     */
+    suspend fun resetLocalProgress() = 
+        withContext(Dispatchers.IO) {
+            wordDao.resetAllProgress()
         }
 
     /**

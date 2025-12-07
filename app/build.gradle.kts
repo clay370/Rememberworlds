@@ -43,6 +43,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -77,16 +78,21 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
     // [新增] Firebase (使用 BOM 管理版本)
-    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth")      // 认证
     implementation("com.google.firebase:firebase-firestore") // 数据库
     // [新增] Firebase 存储 (用于存头像)
     implementation("com.google.firebase:firebase-storage")
 
+    // [新增] Firebase App Check (Play Integrity)
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+    
+    // [新增] 用于调试 App Check (开发阶段模拟器需要)
+    debugImplementation("com.google.firebase:firebase-appcheck-debug")
+
     // [新增] Coil 图片加载库 (用于显示头像)
     implementation("io.coil-kt:coil-compose:2.6.0")
     
-    // [新增] Google AI SDK (Gemini) 用于对话功能
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+
 }

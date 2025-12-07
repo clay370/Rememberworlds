@@ -154,6 +154,6 @@ fun RememberWorldsTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         content = content,
-        // (可选: 可以在此定义 Typography 和 Shapes)
+        typography = Typography
     )
 }

@@ -1,6 +1,9 @@
 package com.example.rememberworlds
 
 import android.app.Application
+import com.google.firebase.FirebaseApp
+import com.google.firebase.appcheck.FirebaseAppCheck
+import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 
 /**
  * 应用程序自定义Application类
@@ -19,6 +22,33 @@ class MyApplication : Application() {
      */
     override fun onCreate() {
         super.onCreate()
-        // 目前为空，可根据需要添加初始化代码
+        
+        // 1. 初始化 Firebase
+        FirebaseApp.initializeApp(this)
+
+        // 2. 配置 App Check (暂时禁用以排除上传错误)
+        /*
+        val firebaseAppCheck = FirebaseAppCheck.getInstance()
+        
+        // 判断是调试版还是发布版
+        val providerFactory = if (BuildConfig.DEBUG) {
+            try {
+                // 强制指定一个固定的 Token
+                val myFixedToken = "D0C26F37-3C59-47AE-86BB-EE9C9B6684C0"
+                System.setProperty("com.google.firebase.appcheck.debug.testing.token", myFixedToken)
+                
+                // 使用反射加载 DebugAppCheckProviderFactory
+                val debugFactoryClass = Class.forName("com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory")
+                val getInstanceMethod = debugFactoryClass.getMethod("getInstance")
+                getInstanceMethod.invoke(null) as com.google.firebase.appcheck.AppCheckProviderFactory
+            } catch (e: Exception) {
+                PlayIntegrityAppCheckProviderFactory.getInstance()
+            }
+        } else {
+            PlayIntegrityAppCheckProviderFactory.getInstance()
+        }
+
+        firebaseAppCheck.installAppCheckProviderFactory(providerFactory)
+        */
     }
 }
