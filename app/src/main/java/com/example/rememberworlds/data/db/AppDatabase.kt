@@ -10,7 +10,7 @@ import androidx.room.RoomDatabase
  * 管理单词实体的存储和访问
  */
 // 数据库注解：指定实体类、版本号和是否导出Schema
-@Database(entities = [WordEntity::class], version = 4, exportSchema = false)
+@Database(entities = [WordEntity::class, UserBookEntity::class], version = 5, exportSchema = false)
 @androidx.room.TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     /**
@@ -18,6 +18,11 @@ abstract class AppDatabase : RoomDatabase() {
      * 用于执行数据库操作
      */
     abstract fun wordDao(): WordDao
+
+    /**
+     * 获取用户词书DAO
+     */
+    abstract fun userBookDao(): UserBookDao
 
     /**
      * 伴生对象，用于实现单例模式

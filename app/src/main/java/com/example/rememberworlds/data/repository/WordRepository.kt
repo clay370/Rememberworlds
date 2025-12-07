@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
  */
 class WordRepository(
     private val wordDao: WordDao,
+    private val userBookDao: com.example.rememberworlds.data.db.UserBookDao?,
     private val context: Context
 ) {
 
@@ -428,4 +429,30 @@ class WordRepository(
         withContext(Dispatchers.IO) {
             wordDao.updateIsWrong(wordId, true)
         }
+
+    // --- User Books ---
+    fun getAllUserBooks() = userBookDao?.getAllUserBooks() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun createUserBook(name: String) {
+        val book = com.example.rememberworlds.data.db.UserBookEntity(name = name)
+        userBookDao?.insert(book)
+    }
+
+    suspend fun deleteUserBook(id: String) {
+        userBookDao?.deleteById(id)
+    }
+
+    suspend fun addUserWord(bookId: String, word: String, meaning: String) {
+        val newWord = WordEntity(
+            id = (word + System.currentTimeMillis()).hashCode(), // Simple unique ID generation
+            word = word,
+            cn = meaning,
+            audio = "", // No audio for manual words initially
+            bookType = bookId,
+            isLearned = false
+        )
+        withContext(Dispatchers.IO) {
+            wordDao.insertAll(listOf(newWord))
+        }
+    }
 }

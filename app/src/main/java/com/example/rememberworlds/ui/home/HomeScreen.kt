@@ -159,6 +159,43 @@ fun BookshelfView(viewModel: MainViewModel) {
     }
     val localFocusManager = LocalFocusManager.current // 焦点管理器，用于清除焦点
 
+    // 新建单词本对话框状态
+    var showCreateBookDialog by remember { mutableStateOf(false) }
+    var newBookName by remember { mutableStateOf("") }
+    
+    if (showCreateBookDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateBookDialog = false },
+            title = { Text("新建单词本") },
+            text = {
+                OutlinedTextField(
+                    value = newBookName,
+                    onValueChange = { newBookName = it },
+                    label = { Text("单词本名称") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newBookName.isNotBlank()) {
+                            viewModel.createNewBook(newBookName)
+                            showCreateBookDialog = false
+                            newBookName = ""
+                        }
+                    }
+                ) {
+                    Text("创建")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateBookDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     // 容器修饰符 - 定义整体布局样式
     val containerModifier = Modifier
         .fillMaxSize()
@@ -283,6 +320,44 @@ fun BookshelfView(viewModel: MainViewModel) {
                     isDownloading = false, // 本地生成，无需下载
                     viewModel = viewModel
                 )
+            }
+            
+            // 新建单词本按钮
+            item {
+                Card(
+                    onClick = { showCreateBookDialog = true },
+                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(170.dp),
+                    border = BorderStroke(
+                        width = 1.dp, 
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "新建单词本",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "新建单词本",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
 
             // --- 官方词书 Section ---
@@ -581,6 +656,54 @@ fun LearningView(viewModel: MainViewModel) {
         mutableStateOf(true) // 是否自动播放发音
     }
 
+    // Add User Word Dialog State
+    var showAddWordDialog by remember { mutableStateOf(false) }
+    var newWordInput by remember { mutableStateOf("") }
+    var newMeaningInput by remember { mutableStateOf("") }
+
+    if (showAddWordDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddWordDialog = false },
+            title = { Text("添加单词") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newWordInput,
+                        onValueChange = { newWordInput = it },
+                        label = { Text("单词 (英文)") },
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = newMeaningInput,
+                        onValueChange = { newMeaningInput = it },
+                        label = { Text("释义 (中文)") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newWordInput.isNotBlank() && newMeaningInput.isNotBlank()) {
+                            viewModel.addUserWord(newWordInput, newMeaningInput)
+                            showAddWordDialog = false
+                            newWordInput = ""
+                            newMeaningInput = ""
+                        }
+                    }
+                ) {
+                    Text("添加")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddWordDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     // 单词切换时的副作用
     LaunchedEffect(currentWord) {
         // 重置卡片旋转状态
@@ -606,6 +729,7 @@ fun LearningView(viewModel: MainViewModel) {
     )
 
     // 主布局
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -744,8 +868,29 @@ fun LearningView(viewModel: MainViewModel) {
                 CircularProgressIndicator()
             }
         } else if (currentWord == null) {
-            // 单词背完或列表为空
-            EmptyStateView(viewModel)
+            // Empty State
+            if (learningBookType.startsWith("user_")) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "单词本为空",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "点击右下角按钮添加单词",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                EmptyStateView(viewModel)
+            }
         } else {
             val word = currentWord!!
 
@@ -863,6 +1008,20 @@ fun LearningView(viewModel: MainViewModel) {
                         )
                     }
                 }
+            }
+        }
+        }
+        
+        // FAB for User Books
+        if (learningBookType.startsWith("user_")) {
+            FloatingActionButton(
+                onClick = { showAddWordDialog = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(24.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "添加单词")
             }
         }
     }

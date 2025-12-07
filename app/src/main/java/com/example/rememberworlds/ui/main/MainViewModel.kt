@@ -27,10 +27,12 @@ import android.widget.Toast
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -97,7 +99,7 @@ data class QuizResultItem(
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
     private val db = AppDatabase.getDatabase(application)
-    private val repository = WordRepository(db.wordDao(), application)
+    private val repository = WordRepository(db.wordDao(), db.userBookDao(), application)
 
     // --- 状态变量 --- 
     private val _isDarkTheme = MutableStateFlow(false)
@@ -131,23 +133,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val bookList = _bookList.asStateFlow()
 
     // 我的单词本列表 (目前仅包含收藏单词本)
-    private val _myBooksList = MutableStateFlow<List<BookModel>>(
-        listOf(
-            BookModel(
-                bookId = "favorite",
-                name = "收藏单词本",
-                category = "我的单词本",
-                isDownloaded = true // 默认为已存在
-            ),
-            BookModel(
-                bookId = "mistake",
-                name = "错词本",
-                category = "我的单词本",
-                isDownloaded = true // 默认为已存在
-            )
+    // Base static books
+    private val staticMyBooks = listOf(
+        BookModel(
+            bookId = "favorite",
+            name = "收藏单词本",
+            category = "我的单词本",
+            isDownloaded = true
+        ),
+        BookModel(
+            bookId = "mistake",
+            name = "错词本",
+            category = "我的单词本",
+            isDownloaded = true
         )
     )
-    val myBooksList = _myBooksList.asStateFlow()
+
+    // Combined Flow: Static + User Created
+    // Combined Flow: Static + User Created
+    val myBooksList: StateFlow<List<BookModel>> = repository.getAllUserBooks().map { userBooks ->
+        val dynamicBooks = userBooks.map { 
+            BookModel(
+                bookId = "user_${it.id}", // Prefix to avoid collision
+                name = it.name,
+                category = "我的单词本",
+                isDownloaded = true
+            )
+        }
+        staticMyBooks + dynamicBooks
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), staticMyBooks)
+
     
     private val _isLearningMode = MutableStateFlow(false)
     val isLearningMode = _isLearningMode.asStateFlow()
@@ -905,6 +920,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     } else if (bookType == "mistake") {
                         Toast.makeText(getApplication(), "暂无错词", Toast.LENGTH_SHORT).show()
                         quitLearning()
+                    } else if (bookType.startsWith("user_")) {
+                         // 用户自定义书，可能是空的，允许停留以添加单词
+                        learningList = emptyList()
+                        _currentWord.value = null
+                         // Don't quit
                     } else {
                         // 全部学完：进入复习模式 (加载所有单词)
                         val allWords = db.wordDao().getAllWordsByBook(bookType)
@@ -1165,18 +1185,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             .edit().putInt("daily_goal", goal).apply()
     }
 
+    fun createNewBook(name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            repository.createUserBook(name)
+            Toast.makeText(getApplication(), "创建成功", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun addUserWord(word: String, meaning: String) {
+        val bookId = _learningBookType.value
+        if (bookId.isBlank() || word.isBlank() || meaning.isBlank()) return
+
+        viewModelScope.launch {
+            repository.addUserWord(bookId, word, meaning)
+            Toast.makeText(getApplication(), "添加成功", Toast.LENGTH_SHORT).show()
+            
+            // Reload current book to show the new word
+            startLearning(bookId) 
+        }
+    }
+
     // --- 学习进度条 ---
     private val _learningBookType = MutableStateFlow("")
     val learningBookType = _learningBookType.asStateFlow()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val currentBookProgress = _learningBookType.flatMapLatest { type ->
-        if (type.isBlank()) flowOf(Pair(0, 0))
-        else combine(
-            db.wordDao().getBookLearnedCount(type),
-            db.wordDao().getBookTotalCount(type)
-        ) { learned, total ->
-            Pair(learned, total)
+        if (type.isBlank()) {
+            flowOf(Pair(0, 0))
+        } else {
+            when (type) {
+                "favorite" -> combine(
+                    db.wordDao().getFavoriteLearnedCount(),
+                    db.wordDao().getFavoriteCount()
+                ) { learned, total -> Pair(learned, total) }
+                "mistake" -> combine(
+                    db.wordDao().getMistakeLearnedCount(),
+                    db.wordDao().getMistakeCount()
+                ) { learned, total -> Pair(learned, total) }
+                else -> combine(
+                    db.wordDao().getBookLearnedCount(type),
+                    db.wordDao().getBookTotalCount(type)
+                ) { learned, total -> Pair(learned, total) }
+            }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), Pair(0, 0))
 

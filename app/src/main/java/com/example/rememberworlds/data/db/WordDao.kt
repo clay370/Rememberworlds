@@ -176,4 +176,13 @@ interface WordDao {
      */
     @Query("UPDATE word_table SET isWrong = :isWrong WHERE id = :wordId")
     suspend fun updateIsWrong(wordId: Int, isWrong: Boolean)
+
+    @Query("SELECT COUNT(*) FROM word_table WHERE isFavorite = 1 AND isLearned = 1")
+    fun getFavoriteLearnedCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM word_table WHERE isWrong = 1")
+    fun getMistakeCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM word_table WHERE isWrong = 1 AND isLearned = 1")
+    fun getMistakeLearnedCount(): Flow<Int>
 }
